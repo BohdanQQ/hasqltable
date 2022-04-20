@@ -9,13 +9,13 @@ printAndExit message = do
     putStrLn message
     exitFailure
 
-assertContains result@(success, errMsg) ex@(expected, errPart) =
+assertContains result@(success, errMsg) ex@(expected, errPart) helper =
   if success == expected
     then
       if not containsErrMsg
-        then printAndExit $ "\n\n--- Unexpected message\n\n" ++ errMsg ++ "\n\n--- when expecting:\n\n" ++ show ex
+        then printAndExit $ "\n\n--- Unexpected message\n\n" ++ errMsg ++ "\n\n--- when expecting:\n\n" ++ show ex ++ "---\n\n" ++ helper
         else putStr ""
-    else printAndExit $ "\n\n--- Unexpected result:\n\n" ++ show result ++ "\n\n--- when expecting:\n\n" ++ show ex
+    else printAndExit $ "\n\n--- Unexpected result:\n\n" ++ show result ++ "\n\n--- when expecting:\n\n" ++ show ex ++ "---\n\n" ++ helper
   where
     containsErrMsg = (Data.Text.toLower . Data.Text.pack $ errPart) `Data.Text.isInfixOf` (Data.Text.toLower . Data.Text.pack $ errMsg)
 
@@ -74,7 +74,7 @@ queryChecktests =
   ]
 
 
-testQueryCheck = map (\(idx, (input, expected)) -> assertContains input expected) (zip [1..] queryChecktests)
+testQueryCheck = map (\(number, (input, expected)) -> assertContains input expected ("Test number (1-indexed): QueryCheck - " ++ show number)) (zip [1..] queryChecktests)
 
 main = do
     last testQueryCheck
