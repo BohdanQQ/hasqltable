@@ -148,20 +148,20 @@ queryCheck _ = (False, "Query must begin with a Select subquery")
 --- PARSING HELPERS
 
 data Conditional
-    = And (Conditional, Conditional)
-    | Or (Conditional, Conditional)
-    | Xor (Conditional, Conditional)
+    = And {leftCond :: Conditional, rightCond :: Conditional}
+    | Or  {leftCond :: Conditional, rightCond :: Conditional}
+    | Xor  {leftCond :: Conditional, rightCond :: Conditional}
     | Not Conditional
     | NotE Expr
-    | Eq (Expr, Expr)
-    | Less (Expr, Expr)
-    | Greater (Expr, Expr)
-    -- TODO string predicates (LIKE)
+    | Eq  {leftExp :: Expr, rightExp :: Expr}
+    | Less {leftExp :: Expr, rightExp :: Expr}
+    | Greater {leftExp :: Expr, rightExp :: Expr}
+    | StrLike {leftExpr :: Expr, rightExp :: Expr} -- TODO: only Col and Const? (String add???)
 
 data Expr
     = Col String
     | Const Cell
-    -- TODO: arith. operators
+    | Operation {left :: Expr, op:: Expr -> Expr -> Expr, right :: Expr}
 
 containsRet :: (SchemaItem -> Bool) -> [SchemaItem] -> (Bool, Cell)
 containsRet f list = if not (null filtered)
