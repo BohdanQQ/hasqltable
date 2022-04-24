@@ -2,7 +2,7 @@ module Operations where
 import           Types
 
 ------------
---- PRINTING (so far rather dump, using max width of all cells for each column)
+--- PRINTING (so far rather dumb, using max width of all cells for each column)
 ------------
 
 prettyPrintCell (CInt    i) = show i
