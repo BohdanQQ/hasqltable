@@ -22,7 +22,8 @@ main = do
     let header    = head splitRows
     let body      = tail splitRows
     let schema    = createDefualtSchema header schemaDesc
-    let tbody     = map (parseWithSchema (map snd schema)) body
+    let schemaCellOrder = map snd schema
+    let tbody     = map (parseWithSchema schemaCellOrder) body
     putStrLn (show schema)
     putStrLn (show tbody)
     putStrLn ""
@@ -33,27 +34,29 @@ parseArgs args | argCount < 2 = error "Invalid Argument Count"
                | otherwise    = (head args, args !! 1)
     where argCount = length args
 
-parseWithSchema schema row = map parser (zip schema row)
+-- parses a row according to a schema (order of Cells in a list)
+-- errors out on invalid (unconvertible) values
+-- SCHEMA -> STRING VALUES OF A ROW -> PARSED ROW
+parseWithSchema :: [Cell] -> [[Char]] -> [Cell]
+parseWithSchema = zipWith parser
   where
-    parser (cellTemplate, cellValue) = unwrapOrErr
+    parser cellTemplate cellValue = unwrapOrErr
         (  "Invalid value "
         ++ cellValue
         ++ " for the schema type "
-        ++ (typeOfCell cellTemplate)
+        ++ typeOfCell cellTemplate
         )
         (parseCell cellTemplate cellValue)
 
 createDefualtSchema names repr = if valid
-    then map createSchemaCell (zip names repr)
+    then zipWith createSchemaCell names repr
     else error "Invalid schema specification/column names"
   where
     valid =
         all (\c -> c == 'i' || c == 'd' || c == 'b' || c == 's') repr
-            && nub names
-            == names
-            && length names
-            == length repr
-    createSchemaCell (name, c) = case c of
+            && nub names == names
+            && length names == length repr
+    createSchemaCell name c = case c of
         'i' -> (name, CInt 0)
         's' -> (name, CStr "")
         'd' -> (name, CDouble 0)

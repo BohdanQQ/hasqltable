@@ -10,6 +10,8 @@ data Cell
 
 type SchemaItem = (String, Cell)
 
+-- schema is not a map - must remember order
+-- rewrite would cause unnecessary trouble
 type Schema = [SchemaItem]
 
 getDefaultsFromShcema :: Schema -> String -> Maybe Cell
@@ -54,7 +56,7 @@ instance (Eq Cell) where
     (CInt    a) == (CDouble b) = fromInteger a == b
     (CDouble a) == (CInt    b) = a == fromInteger b
     (CBool   a) == (CBool   b) = a == b
-    _           == _           = error "Cannot compare incompatible cells"
+    x           == y           = error ("Cannot compare incompatible cells (" ++ show x ++ ", " ++ show y ++ ")")
 
 instance (Ord Cell) where
     compare (CStr    a) (CStr    b) = compare a b
@@ -63,7 +65,7 @@ instance (Ord Cell) where
     compare (CInt    a) (CDouble b) = compare (fromInteger a) b
     compare (CDouble a) (CInt    b) = compare a (fromInteger b)
     compare (CBool   a) (CBool   b) = compare a b
-    compare _           _           = error "Cannot compare incompatible cells"
+    compare x           y           = error ("Cannot compare incompatible cells (" ++ show x ++ ", " ++ show y ++ ")")  
 
 instance (Show Cell) where
     show (CStr    a) = 'S' : show a
@@ -154,10 +156,12 @@ data Conditional
     | Eq (Expr, Expr)
     | Less (Expr, Expr)
     | Greater (Expr, Expr)
+    -- TODO string predicates (LIKE)
 
 data Expr
     = Col String
     | Const Cell
+    -- TODO: arith. operators
 
 containsRet :: (SchemaItem -> Bool) -> [SchemaItem] -> (Bool, Cell)
 containsRet f list = if not (null filtered)
@@ -184,6 +188,8 @@ exprCompat contextSchema (Const cellVal1) (Const cellVal2) compatibleJudge =
 exprCompat s const col j = exprCompat s col const j
 
 -- WIP condition evaluation (don't know how the expr will be friendly with the parser, so TODO until parsing is done?)
+-- TODO evaluation context includes both schema and row
+-- rely on the fact that row conforms to schema??? (should be ok as long as initial parsing is correct)  
 -- evalCond :: Schema -> Row -> Conditional -> Bool
 -- evalCond s row (And (l, r)) = evalCond s row l && evalCond s row r
 -- evalCond s row (Or  (l, r)) = evalCond s row l || evalCond s row r
