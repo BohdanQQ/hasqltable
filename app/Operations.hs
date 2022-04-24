@@ -1,34 +1,42 @@
 module Operations where
+import           Data.List                      ( transpose )
 import           Types
 
 ------------
---- PRINTING (so far rather dumb, using max width of all cells for each column)
+--- PRINTING
 ------------
 
 prettyPrintCell (CInt    i) = show i
 prettyPrintCell (CDouble i) = show i
-prettyPrintCell (CStr    i) = show i
+prettyPrintCell (CStr    i) = i
 prettyPrintCell (CBool   i) = show i
 
 prettyPrintTable :: Table -> IO ()
 prettyPrintTable (schema, rowgroups) = do
-    prettyPrintSchema schema largestCol
+    prettyPrintSchema schema colSizes
     putStrLn ""
-    mapM_ (`prettyPrintSingleGroup` largestCol) rowgroups
+    mapM_ (`prettyPrintSingleGroup` colSizes) rowgroups
   where
-    largestSchemaCol = maximum (map (length . fst) schema)
-    largestRowsCol =
-        maximum (map (length . prettyPrintCell) (concat (concat rowgroups)))
-    largestCol = max largestRowsCol largestSchemaCol
+    schemaColLengths = map (length . fst) schema
+    maxLenPerCol     = map (maximum . map (length . prettyPrintCell))
+                           (transpose (concat rowgroups))
+    colSizes = zipWith max maxLenPerCol schemaColLengths
 
-paddTo padding what string = replicate (padding - length string) what ++ string
-
-prettyPrintSchema schema padd =
-    mapM_ ((\s -> putStr (paddTo padd ' ' s ++ "|")) . fst) schema
-
-prettyPrintSingleGroup rows padd = mapM_ (prettyPrintRow padd) rows
+padTo :: Int -> Char -> String -> String
+padTo padding what string =
+    " " ++ string ++ replicate (padding - length string) what ++ " "
 
 
-prettyPrintRow padd row = do
-    mapM_ (\cell -> putStr (paddTo padd ' ' (prettyPrintCell cell) ++ "|")) row
+prettyPrintSchema :: [(String, Cell)] -> [Int] -> IO ()
+prettyPrintSchema schema padding =
+    mapM_ (\(s, p) -> putStr (padTo p ' ' (fst s) ++ "|")) (zip schema padding)
+
+prettyPrintSingleGroup :: [Row] -> [Int] -> IO ()
+prettyPrintSingleGroup rows padding = mapM_ (prettyPrintRow padding) rows
+
+prettyPrintRow :: [Int] -> Row -> IO ()
+prettyPrintRow padding row = do
+    mapM_
+        (\(cell, pad) -> putStr (padTo pad ' ' (prettyPrintCell cell) ++ "|"))
+        (zip row padding)
     putStrLn ""
