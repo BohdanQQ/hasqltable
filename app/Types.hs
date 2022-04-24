@@ -1,5 +1,6 @@
 module Types where
-import           Data.List                      ( nub )
+import           Data.List                      ( nub, elemIndex )
+import Text.Read (readMaybe)
 
 data Cell
   = CStr String
@@ -10,6 +11,35 @@ data Cell
 type SchemaItem = (String, Cell)
 
 type Schema = [SchemaItem]
+
+getDefaultsFromShcema :: Schema -> String -> Maybe Cell
+getDefaultsFromShcema [] _ = Nothing
+getDefaultsFromShcema (si@(siKey, siCellVal) : sis) key =
+    if key == siKey then Just siCellVal else getDefaultsFromShcema sis key
+
+class Compat a where
+    compatibleOrd :: a -> a -> Bool -- <, >
+    compatibleEq :: a -> a -> Bool -- ==
+    compatibleStrLowerEq :: a -> a -> Bool -- LIKE
+
+instance (Compat Cell) where
+    compatibleOrd (CInt    _) (CInt    _) = True
+    compatibleOrd (CStr    _) (CStr    _) = True
+    compatibleOrd (CDouble _) (CDouble _) = True
+    compatibleOrd (CBool   _) (CBool   _) = True
+    compatibleOrd (CInt    _) (CDouble _) = True
+    compatibleOrd (CDouble _) (CInt    _) = True
+    compatibleOrd _           _           = False
+    compatibleEq (CInt    _) (CInt    _) = True
+    compatibleEq (CStr    _) (CStr    _) = True
+    compatibleEq (CDouble _) (CDouble _) = True
+    compatibleEq (CBool   _) (CBool   _) = True
+    compatibleEq (CInt    _) (CDouble _) = True
+    compatibleEq (CDouble _) (CInt    _) = True
+    compatibleEq _           _           = False
+    compatibleStrLowerEq (CStr _) (CStr _) = True
+    compatibleStrLowerEq _        _        = False
+
 
 type Row = [Cell]
 
@@ -40,6 +70,26 @@ instance (Show Cell) where
     show (CInt    a) = 'I' : show a
     show (CDouble a) = 'D' : show a
     show (CBool   a) = 'B' : show a
+
+unwrapWith :: (t -> a) -> Maybe t -> Maybe a
+unwrapWith what Nothing = Nothing 
+unwrapWith what (Just x) = Just (what x) 
+
+unwrapOrErr :: [Char] -> Maybe p -> p
+unwrapOrErr message Nothing  = error message
+unwrapOrErr message (Just a) = a
+
+parseCell :: Cell -> String -> Maybe Cell
+parseCell (CStr _) s = Just (CStr s) 
+parseCell (CInt _) s = let i = readMaybe s in unwrapWith CInt i 
+parseCell (CDouble _) s = let i = readMaybe s in unwrapWith CDouble i 
+parseCell (CBool _) s = let i = readMaybe s in unwrapWith CBool i 
+
+typeOfCell :: Cell -> [Char]
+typeOfCell (CStr _) = "String"
+typeOfCell (CInt _) = "Int"
+typeOfCell (CDouble _) = "Double"
+typeOfCell (CBool _) = "Bool"
 
 data Order = Asc | Desc
 
@@ -91,3 +141,75 @@ queryCheck [] = (False, "Empty query")
 queryCheck ((Select cols) : rest) | null cols = (False, "Empty select")
                                   | otherwise = queryCheckWhere rest
 queryCheck _ = (False, "Query must begin with a Select subquery")
+
+
+--- PARSING HELPERS
+
+data Conditional
+    = And (Conditional, Conditional)
+    | Or (Conditional, Conditional)
+    | Xor (Conditional, Conditional)
+    | Not Conditional
+    | NotE Expr
+    | Eq (Expr, Expr)
+    | Less (Expr, Expr)
+    | Greater (Expr, Expr)
+
+data Expr
+    = Col String
+    | Const Cell
+
+containsRet :: (SchemaItem -> Bool) -> [SchemaItem] -> (Bool, Cell)
+containsRet f list = if not (null filtered)
+    then (True, snd . head $ filtered)
+    else (False, CStr "")
+    where filtered = filter f list
+
+-- returns true if both expressions have compatible types
+-- types of expressions are expressed using the Cell type and
+-- compatible judge is the function comparing those cells
+exprCompat :: Schema -> Expr -> Expr -> (Cell -> Cell -> Bool) -> Bool
+exprCompat contextSchema (Col colName1) (Col colName2) compatibleJudge =
+    bothPresent && compatibleJudge fstCell sndCell
+  where
+    (fstPresent, fstCell) = containsRet (\x -> fst x == colName1) contextSchema
+    (sndPresent, sndCell) = containsRet (\x -> fst x == colName2) contextSchema
+    bothPresent           = fstPresent && sndPresent
+exprCompat contextSchema (Col colName1) (Const cellVal) compatibleJudge =
+    fstPresent && compatibleJudge fstCell cellVal
+  where
+    (fstPresent, fstCell) = containsRet (\x -> fst x == colName1) contextSchema
+exprCompat contextSchema (Const cellVal1) (Const cellVal2) compatibleJudge =
+    compatibleJudge cellVal1 cellVal2
+exprCompat s const col j = exprCompat s col const j
+
+-- WIP condition evaluation (don't know how the expr will be friendly with the parser, so TODO until parsing is done?)
+-- evalCond :: Schema -> Row -> Conditional -> Bool
+-- evalCond s row (And (l, r)) = evalCond s row l && evalCond s row r
+-- evalCond s row (Or  (l, r)) = evalCond s row l || evalCond s row r
+-- evalCond s row (Xor (l, r)) = (le || re) && ((not le && re) || (not re && le))
+--   where
+--     le = evalCond s row l
+--     re = evalCond s row r
+-- evalCond s             row (Not x     ) = not (evalCond s row x)
+-- -- TODO
+-- -- evalCond s             row (NotE expr) = if not compatible
+-- --     then error "Incompatible types for equality operator"
+-- --     else False
+-- --     where compatible = exprCompat contextSchema l r compatibleEq
+-- evalCond contextSchema row (Eq  (l, r)) = if not compatible
+--     then error "Incompatible types for equality operator or row not adhering to schema"
+--     else False -- TODO l == r
+--     where compatible = exprCompat contextSchema l r compatibleEq
+-- evalCond contextSchema row (Less  (l, r)) = if not compatible
+--     then error "Incompatible types for equality operator or row not adhering to schema"
+--     else False -- TODO l < r
+--     where compatible = exprCompat contextSchema l r compatibleOrd
+-- evalCond contextSchema row (Greater  (l, r)) 
+--     | not compatible =  error "Incompatible types for equality operator or row not adhering to schema"
+--     | not rowCompatible = 
+--     else False -- TODO l > r, first attempt:
+--     where 
+--         compatible = exprCompat contextSchema l r compatibleOrd
+--         idx c = elemIndex c (map fst contextSchema)
+--         extractCell (Col c) = row !! (idx c)
