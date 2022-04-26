@@ -10,6 +10,7 @@ import           System.IO                      ( Handle
                                                 , hGetContents
                                                 )
 import           Types
+import qualified GHC.Unicode as Char
 
 ------------
 --- PRINTING
@@ -72,11 +73,12 @@ parseCsv delimiter schemaDesc handle = do
 
 createDefualtSchema :: [String] -> String -> [(String, Cell)]
 createDefualtSchema names repr = if valid
-    then zipWith createSchemaCell names repr
+    then zipWith createSchemaCell names normalizedRepr
     else error "Invalid schema specification/column names"
   where
+    normalizedRepr = map Char.toLower repr
     valid =
-        all (\c -> c == 'i' || c == 'd' || c == 'b' || c == 's') repr
+        all (\c -> c == 'i' || c == 'd' || c == 'b' || c == 's') normalizedRepr
             && nub names
             == names
             && length names
