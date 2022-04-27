@@ -1,6 +1,11 @@
 module Types where
-import           Data.List                      ( nub, elemIndex )
-import Text.Read (readMaybe)
+import           Data.List                      ( elemIndex
+                                                , intercalate
+                                                , intersperse
+                                                , nub
+                                                )
+import           Data.Maybe                     ( isJust )
+import           Text.Read                      ( readMaybe )
 
 data Cell
   = CStr String
@@ -22,7 +27,7 @@ getDefaultsFromShcema (si@(siKey, siCellVal) : sis) key =
 class Compat a where
     compatibleOrd :: a -> a -> Bool -- <, >
     compatibleEq :: a -> a -> Bool -- ==
-    compatibleStrLowerEq :: a -> a -> Bool -- LIKE
+    compatibleArith :: a -> a -> Bool -- + - * /
 
 instance (Compat Cell) where
     compatibleOrd (CInt    _) (CInt    _) = True
@@ -39,8 +44,11 @@ instance (Compat Cell) where
     compatibleEq (CInt    _) (CDouble _) = True
     compatibleEq (CDouble _) (CInt    _) = True
     compatibleEq _           _           = False
-    compatibleStrLowerEq (CStr _) (CStr _) = True
-    compatibleStrLowerEq _        _        = False
+    compatibleArith (CInt    _) (CInt    _) = True
+    compatibleArith (CDouble _) (CDouble _) = True
+    compatibleArith (CInt    _) (CDouble _) = True
+    compatibleArith (CDouble _) (CInt    _) = True
+    compatibleArith _           _           = False
 
 
 type Row = [Cell]
@@ -49,6 +57,8 @@ type RowGroup = [Row]
 
 type Table = (Schema, [RowGroup])
 
+showCellsWith showFn cells = intercalate "," (map showFn cells)
+
 instance (Eq Cell) where
     (CStr    a) == (CStr    b) = a == b
     (CInt    a) == (CInt    b) = a == b
@@ -56,7 +66,11 @@ instance (Eq Cell) where
     (CInt    a) == (CDouble b) = fromInteger a == b
     (CDouble a) == (CInt    b) = a == fromInteger b
     (CBool   a) == (CBool   b) = a == b
-    x           == y           = error ("Cannot compare incompatible cells (" ++ show x ++ ", " ++ show y ++ ")")
+    x           == y           = error
+        (  "Cannot compare incompatible cells ("
+        ++ showCellsWith show [x, y]
+        ++ ")"
+        )
 
 instance (Ord Cell) where
     compare (CStr    a) (CStr    b) = compare a b
@@ -65,7 +79,50 @@ instance (Ord Cell) where
     compare (CInt    a) (CDouble b) = compare (fromInteger a) b
     compare (CDouble a) (CInt    b) = compare a (fromInteger b)
     compare (CBool   a) (CBool   b) = compare a b
-    compare x           y           = error ("Cannot compare incompatible cells (" ++ show x ++ ", " ++ show y ++ ")")  
+    compare x           y           = error
+        (  "Cannot compare incompatible cells ("
+        ++ showCellsWith show [x, y]
+        ++ ")"
+        )
+
+instance (Num Cell) where
+    (CInt    a) + (CInt    b) = CInt (a + b)
+    (CDouble a) + (CDouble b) = CDouble (a + b)
+    (CInt    a) + (CDouble b) = CDouble (fromInteger a + b)
+    (CDouble a) + (CInt    b) = CDouble (a + fromInteger b)
+    x + y =
+        error
+            (  "Cannot add incompatible cellls ("
+            ++ showCellsWith show [x, y]
+            ++ ")"
+            )
+    (CInt    a) * (CInt    b) = CInt (a * b)
+    (CDouble a) * (CDouble b) = CDouble (a * b)
+    (CInt    a) * (CDouble b) = CDouble (fromInteger a * b)
+    (CDouble a) * (CInt    b) = CDouble (a * fromInteger b)
+    x           * y           = error
+        (  "Cannot multiply incompatible cellls ("
+        ++ showCellsWith show [x, y]
+        ++ ")"
+        )
+    abs (CInt    a) = CInt (abs a)
+    abs (CDouble a) = CDouble (abs a)
+    abs x =
+        error ("No absolute value for cell type " ++ showCellsWith show [x])
+    signum (CInt a) = CInt (signum a)
+    signum (CDouble a) = CDouble (signum a)
+    signum x = error ("No signum for cell type " ++ showCellsWith show [x])
+    fromInteger = CInt
+    negate (CInt a) = CInt (negate a)
+    negate (CDouble a) = CDouble (negate a)
+    negate x = error ("No negation for cell type " ++ showCellsWith show [x])
+
+instance (Fractional Cell) where
+    recip (CInt    a) = CDouble (recip (fromInteger a))
+    recip (CDouble a) = CDouble (recip a)
+    recip x           = error
+        ("No multiplicative inverse for (" ++ showCellsWith show [x] ++ ")")
+    fromRational x = CDouble (fromRational x)
 
 instance (Show Cell) where
     show (CStr    a) = 'S' : show a
@@ -74,24 +131,24 @@ instance (Show Cell) where
     show (CBool   a) = 'B' : show a
 
 unwrapWith :: (t -> a) -> Maybe t -> Maybe a
-unwrapWith what Nothing = Nothing 
-unwrapWith what (Just x) = Just (what x) 
+unwrapWith what Nothing  = Nothing
+unwrapWith what (Just x) = Just (what x)
 
 unwrapOrErr :: [Char] -> Maybe p -> p
 unwrapOrErr message Nothing  = error message
 unwrapOrErr message (Just a) = a
 
 parseCell :: Cell -> String -> Maybe Cell
-parseCell (CStr _) s = Just (CStr s) 
-parseCell (CInt _) s = let i = readMaybe s in unwrapWith CInt i 
-parseCell (CDouble _) s = let i = readMaybe s in unwrapWith CDouble i 
-parseCell (CBool _) s = let i = readMaybe s in unwrapWith CBool i 
+parseCell (CStr    _) s = Just (CStr s)
+parseCell (CInt    _) s = let i = readMaybe s in unwrapWith CInt i
+parseCell (CDouble _) s = let i = readMaybe s in unwrapWith CDouble i
+parseCell (CBool   _) s = let i = readMaybe s in unwrapWith CBool i
 
 typeOfCell :: Cell -> [Char]
-typeOfCell (CStr _) = "String"
-typeOfCell (CInt _) = "Int"
+typeOfCell (CStr    _) = "String"
+typeOfCell (CInt    _) = "Int"
 typeOfCell (CDouble _) = "Double"
-typeOfCell (CBool _) = "Bool"
+typeOfCell (CBool   _) = "Bool"
 
 data Order = Asc | Desc
 
@@ -147,75 +204,74 @@ queryCheck _ = (False, "Query must begin with a Select subquery")
 
 --- PARSING HELPERS
 
-data Conditional
-    = And {leftCond :: Conditional, rightCond :: Conditional}
-    | Or  {leftCond :: Conditional, rightCond :: Conditional}
-    | Xor  {leftCond :: Conditional, rightCond :: Conditional}
-    | Not Conditional
-    | NotE Expr
-    | Eq  {leftExp :: Expr, rightExp :: Expr}
-    | Less {leftExp :: Expr, rightExp :: Expr}
-    | Greater {leftExp :: Expr, rightExp :: Expr}
-    | StrLike {leftExpr :: Expr, rightExp :: Expr} -- TODO: only Col and Const? (String add???)
-
 data Expr
     = Col String
     | Const Cell
-    | Operation {left :: Expr, op:: Expr -> Expr -> Expr, right :: Expr}
+    | Operation {left :: Expr, op :: Cell -> Cell -> Cell, right :: Expr}
 
-containsRet :: (SchemaItem -> Bool) -> [SchemaItem] -> (Bool, Cell)
-containsRet f list = if not (null filtered)
-    then (True, snd . head $ filtered)
-    else (False, CStr "")
-    where filtered = filter f list
+ensureAndContinue
+    :: String
+    -> (Cell -> Cell -> Bool)
+    -> (Cell -> Cell -> Cell)
+    -> Cell
+    -> Cell
+    -> Cell
+ensureAndContinue desc judge finalFn argl argr
+    | judge argl argr = finalFn argl argr
+    | otherwise = error
+        (  "Incompatible types for operation "
+        ++ desc
+        ++ " detected ("
+        ++ showCellsWith typeOfCell [argl, argr]
+        ++ ")"
+        )
 
--- returns true if both expressions have compatible types
--- types of expressions are expressed using the Cell type and
--- compatible judge is the function comparing those cells
-exprCompat :: Schema -> Expr -> Expr -> (Cell -> Cell -> Bool) -> Bool
-exprCompat contextSchema (Col colName1) (Col colName2) compatibleJudge =
-    bothPresent && compatibleJudge fstCell sndCell
+
+-- TODO: unary operator support (not, unary -)
+--       eq, neq, le, gt
+boolCheck (CBool _) (CBool _) = True
+boolCheck _         _         = False
+
+add = ensureAndContinue "add" compatibleArith (+)
+mul = ensureAndContinue "multiply" compatibleArith (*)
+sub = ensureAndContinue "subtract" compatibleArith (-)
+div = ensureAndContinue "divide" compatibleArith (/)
+boolAnd =
+    ensureAndContinue "and" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
+boolOr =
+    ensureAndContinue "or" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
+
+getCellInSchema [] _ = Nothing
+getCellInSchema ((k, c) : schema) name | name == k = Just c
+                                       | otherwise = getCellInSchema schema name
+
+unwrapMaybe _      (Just val) = val
+unwrapMaybe errMsg _          = error errMsg
+
+getIdxOrErr errMsg row index | length row <= index = error errMsg
+                             | otherwise           = row !! index
+
+evalExpr :: Schema -> Row -> Expr -> Cell
+evalExpr schema row (Const cell) = cell
+evalExpr schema row (Col colName)
+    | found && areSameType = item
+    | not found = error ("Column " ++ colName ++ " not found in schema")
+    | otherwise = error
+        (  "Type "
+        ++ typeOfCell item
+        ++ " should be (according to schema) "
+        ++ typeOfCell unwrapped
+        )
   where
-    (fstPresent, fstCell) = containsRet (\x -> fst x == colName1) contextSchema
-    (sndPresent, sndCell) = containsRet (\x -> fst x == colName2) contextSchema
-    bothPresent           = fstPresent && sndPresent
-exprCompat contextSchema (Col colName1) (Const cellVal) compatibleJudge =
-    fstPresent && compatibleJudge fstCell cellVal
-  where
-    (fstPresent, fstCell) = containsRet (\x -> fst x == colName1) contextSchema
-exprCompat contextSchema (Const cellVal1) (Const cellVal2) compatibleJudge =
-    compatibleJudge cellVal1 cellVal2
-exprCompat s const col j = exprCompat s col const j
+    foundItem = getCellInSchema schema colName
+    found     = isJust foundItem
+    unwrapped = unwrapMaybe "impossible error" foundItem
+    index =
+        unwrapMaybe "impossible error" (elemIndex (colName, unwrapped) schema)
+    item        = getIdxOrErr "Row does not adhere to schema" row index
+    areSameType = typeOfCell item == typeOfCell unwrapped
 
--- WIP condition evaluation (don't know how the expr will be friendly with the parser, so TODO until parsing is done?)
--- TODO evaluation context includes both schema and row
--- rely on the fact that row conforms to schema??? (should be ok as long as initial parsing is correct)  
--- evalCond :: Schema -> Row -> Conditional -> Bool
--- evalCond s row (And (l, r)) = evalCond s row l && evalCond s row r
--- evalCond s row (Or  (l, r)) = evalCond s row l || evalCond s row r
--- evalCond s row (Xor (l, r)) = (le || re) && ((not le && re) || (not re && le))
---   where
---     le = evalCond s row l
---     re = evalCond s row r
--- evalCond s             row (Not x     ) = not (evalCond s row x)
--- -- TODO
--- -- evalCond s             row (NotE expr) = if not compatible
--- --     then error "Incompatible types for equality operator"
--- --     else False
--- --     where compatible = exprCompat contextSchema l r compatibleEq
--- evalCond contextSchema row (Eq  (l, r)) = if not compatible
---     then error "Incompatible types for equality operator or row not adhering to schema"
---     else False -- TODO l == r
---     where compatible = exprCompat contextSchema l r compatibleEq
--- evalCond contextSchema row (Less  (l, r)) = if not compatible
---     then error "Incompatible types for equality operator or row not adhering to schema"
---     else False -- TODO l < r
---     where compatible = exprCompat contextSchema l r compatibleOrd
--- evalCond contextSchema row (Greater  (l, r)) 
---     | not compatible =  error "Incompatible types for equality operator or row not adhering to schema"
---     | not rowCompatible = 
---     else False -- TODO l > r, first attempt:
---     where 
---         compatible = exprCompat contextSchema l r compatibleOrd
---         idx c = elemIndex c (map fst contextSchema)
---         extractCell (Col c) = row !! (idx c)
+evalExpr schema row (Operation l op r) = op lres rres
+  where
+    lres = evalExpr schema row l
+    rres = evalExpr schema row r
