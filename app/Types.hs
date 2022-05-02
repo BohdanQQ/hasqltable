@@ -241,10 +241,6 @@ boolAnd =
 boolOr =
     ensureAndContinue "or" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
 
-getCellInSchema [] _ = Nothing
-getCellInSchema ((k, c) : schema) name | name == k = Just c
-                                       | otherwise = getCellInSchema schema name
-
 unwrapMaybe _      (Just val) = val
 unwrapMaybe errMsg _          = error errMsg
 
@@ -263,7 +259,7 @@ evalExpr schema row (Col colName)
         ++ typeOfCell unwrapped
         )
   where
-    foundItem = getCellInSchema schema colName
+    foundItem = lookup colName schema
     found     = isJust foundItem
     unwrapped = unwrapMaybe "impossible error" foundItem
     index =
