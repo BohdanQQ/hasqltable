@@ -138,9 +138,67 @@ testCellParse = map
     (\(number, ((in1, in2), expected)) -> assertEq
         (parseCell in1 in2)
         expected
-        ("Test number (1-indexed): QueryCheck - " ++ show number)
+        ("Test number (1-indexed): CellParse - " ++ show number)
     )
     (zip [1 ..] cellParseTests)
+
+createEvalTest lctor rctor left op right = 
+    Operation (Const (lctor left)) op (Const (rctor right))
+
+evalInt = createEvalTest CInt CInt
+evalDouble = createEvalTest CDouble CDouble 
+evalBool = createEvalTest CBool CBool
+
+
+exprEvalNoTableTests = 
+    [
+        ( 
+            evalInt 3 add 2,
+            CInt 5
+        ),
+        ( 
+            evalDouble 3 add 2,
+            CDouble 5
+        ),
+        ( 
+            evalDouble 2 sub 3,
+            CDouble (-1)
+        ),
+        (
+            evalDouble 5 Types.div 2,
+            CDouble 2.5
+        ),
+        (
+            evalInt 5 mul 8,
+            CInt 40
+        ),
+        (
+            evalBool True boolAnd False,
+            CBool False 
+        ),
+        (
+            evalBool True boolOr False,
+            CBool True 
+        ),
+        (
+            createEvalTest CInt CDouble 2 sub 5,
+            CDouble (-3)
+        ),
+        (
+            createEvalTest CDouble CInt 2 Types.div 5,
+            CDouble 0.4
+        )
+    ]
+
+testEvalNoTable = map
+    (\(number, (input, expected)) -> assertEq
+        (evalExpr [] [] input)
+        expected
+        ("Test number (1-indexed): EvalExpr - no schema/table - " ++ show number)
+    )
+    (zip [1 ..] exprEvalNoTableTests)
+
 main = do
     last testQueryCheck
     last testCellParse
+    last testEvalNoTable
