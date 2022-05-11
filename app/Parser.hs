@@ -60,7 +60,7 @@ string str@(c : s) = satisfy (== c) >> string s >> pure str
 string []          = parserPure []
 
 lowerUpperString :: [Char] -> Parser [Char]
-lowerUpperString str@(c:s) = satisfy (\a -> (toLower a) == (toLower c)) >>  lowerUpperString s >> pure str
+lowerUpperString str@(c:s) = satisfy (\a -> toLower a == toLower c) >>  lowerUpperString s >> pure str
 lowerUpperString [] = parserPure []
 
 many :: Parser a -> Parser [a]

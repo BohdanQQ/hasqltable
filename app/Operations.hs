@@ -113,9 +113,14 @@ parseWithSchema = zipWith parser
 --- QUERY PARSING
 -------
 
-parseSequenceWithAccumulation :: [Parser SubQuery] -> Parser [SubQuery ]
-parseSequenceWithAccumulation parsers@(p:ps) =
-    p >>= (\result -> whitespace >> parseSequenceWithAccumulation ps >>= (\sndRes -> parserPure (result:sndRes)))
+parseSequenceWithAccumulation :: [Parser SubQuery] -> Parser [SubQuery]
+parseSequenceWithAccumulation parsers@(p : ps) =
+    p
+        >>= (\result ->
+                whitespace
+                    >>  parseSequenceWithAccumulation ps
+                    >>= (\sndRes -> parserPure (result : sndRes))
+            )
 parseSequenceWithAccumulation [] = parserPure []
 
 clauses = ["select", "where", "groupby", "orderby", "limit"]
@@ -123,11 +128,10 @@ clauses = ["select", "where", "groupby", "orderby", "limit"]
 parseQuery :: String -> Maybe [SubQuery]
 parseQuery q = case res of
     (Just (result, rest)) -> if null rest then Just result else Nothing
-    Nothing -> Nothing
+    Nothing               -> Nothing
   where
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
-    p =
-        parseSequenceWithAccumulation [parseSelect, parseLimit]
+    p   = parseSequenceWithAccumulation [parseSelect, parseLimit]
         `orElse` parseSequenceWithAccumulation [parseSelect]
 parseSelect =
     Parser.lowerUpperString "SELECT "
@@ -170,10 +174,17 @@ notClause =
             )
 
 
-execute query table = foldl exec table query
+execute query table = foldl exec table reorderedQuery
   where
+    reorderedQuery = reorderQuery query
     exec (Left  table) qry = executeQuery table qry
     exec (Right error) _   = Right error
+    reorderQuery q = sortWith (\a b -> idQ a < idQ b) q
+    idQ (Select  _) = 10 -- select as last
+    idQ (Limit   _) = 9
+    idQ (OrderBy _) = 8 -- orderby before select (to ensure we can order by any column)
+    idQ (GroupBy _) = 7
+    idQ (Where   _) = 6
 
 type QueryResult = Either Table String
 
@@ -181,13 +192,12 @@ type QueryResult = Either Table String
 ------
 --- SELECT
 ------
-executeQuery :: Table -> SubQuery -> QueryResult
 executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
     then Left (newSchema, extractedRows)
     else Right err0
   where
     schemaCols       = map fst schema
-    mbSchemaIndicies = zip cols (map (flip elemIndex schemaCols) cols)
+    mbSchemaIndicies = zip cols (map (`elemIndex` schemaCols) cols)
     invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
     err0             = if null invalidCols
         then ""
@@ -202,4 +212,63 @@ executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
 ------
 executeQuery (schema, rowgroups) (Limit rowCount) =
     Left (schema, [take (fromInteger rowCount) (concat rowgroups)])
+
+------
+--- ORDER BY
+------
+
+executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
+    case sortedRows of
+        (Left  res) -> Left (schema, [res])
+        (Right err) -> Right err
+
+  where
+    comparer = case order of
+        Asc  -> (>)
+        Desc -> (<)
+    schemaCols = map fst schema
+    rows       = concat rowgroups
+    sortedRows = foldl folder (Left rows) columns
+    folder (Left  cells) column = orderByOne schemaCols column cells comparer
+    folder (Right msg  ) column = Right msg
+
+orderByOne
+    :: [String]
+    -> String
+    -> [[Cell]]
+    -> (Cell -> Cell -> Bool)
+    -> Either [[Cell]] String
+orderByOne schema column rows comparer = if isNothing mbColIdx
+    then Right $ "Could not found column " ++ column
+    else Left sortedRows
+  where
+    sortedRows =
+        sortWith (\r1 r2 -> comparer (r1 !! colIdx) (r2 !! colIdx)) rows
+    mbColIdx = elemIndex column schema
+    colIdx   = fromJust mbColIdx
+
+
+mergeWith :: (a -> a -> Bool) -> [a] -> [a] -> [a]
+mergeWith _    []        s         = s
+mergeWith _    f         []        = f
+mergeWith comp (fa : fb) (sa : sb) = if comp fa sa
+    then fa : mergeWith comp fb (sa : sb)
+    else sa : mergeWith comp (fa : fb) sb
+
+partition :: [a] -> ([a], [a])
+partition a = partition' a a
+
+partition' :: [a] -> [a] -> ([a], [a])
+partition' (a : b) (_ : _ : z) =
+    let (left, right) = partition' b z in (a : left, right)
+partition' a b = ([], a)
+
+sortWith :: (a -> a -> Bool) -> [a] -> [a]
+sortWith _ [a] = [a]
+sortWith _ []  = []
+sortWith cmp a =
+    let (left, right) = partition a
+        lSorted       = sortWith cmp left
+        rSorted       = sortWith cmp right
+    in  mergeWith cmp lSorted rSorted
 
