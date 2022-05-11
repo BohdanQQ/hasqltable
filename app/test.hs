@@ -21,7 +21,7 @@ assertContains result@(success, errMsg) ex@(expected, errPart) helper =
                 ++ errMsg
                 ++ "\n\n--- when expecting:\n\n"
                 ++ show ex
-                ++ "---\n\n"
+                ++ "\n\n---\n\n"
                 ++ helper
             else putStr ""
         else
@@ -30,7 +30,7 @@ assertContains result@(success, errMsg) ex@(expected, errPart) helper =
             ++ show result
             ++ "\n\n--- when expecting:\n\n"
             ++ show ex
-            ++ "---\n\n"
+            ++ "\n\n---\n\n"
             ++ helper
   where
     containsErrMsg =
@@ -45,7 +45,7 @@ assertEq result ex helper = if result == ex
         ++ show result
         ++ "\n\n--- when expecting:\n\n"
         ++ show ex
-        ++ "---\n\n"
+        ++ "\n\n---\n\n"
         ++ helper
 
 queryChecktests =
@@ -66,7 +66,7 @@ queryChecktests =
        queryCheck [Select ["aleph"], GroupBy []]       , (False, "empty"))
     , ( -- empty orderby
        queryCheck [Select ["aleph"], OrderBy (Asc, [])], (False, "empty"))
-    , (queryCheck [Select ["aleph"], Limit 0]          , (True, "nonnegative"))
+    , (queryCheck [Select ["aleph"], Limit 0]          , (True, ""))
     , ( -- limit must be used with nonnegative number
        queryCheck [Select ["aleph"], Limit (-1)]       , (False, "nonnegative"))
     , ( queryCheck
@@ -86,7 +86,7 @@ queryChecktests =
           , OrderBy (Asc, [])
           , Limit 1
           ]
-      , (True, "")
+      , (False, "empty")
       )
     , ( -- duplicate clause
         queryCheck
@@ -112,13 +112,13 @@ queryChecktests =
     ]
 
 
-testQueryCheck = map
+testQueryCheck = testOn
     (\(number, (input, expected)) -> assertContains
         input
         expected
         ("Test number (1-indexed): QueryCheck - " ++ show number)
     )
-    (zip [1 ..] queryChecktests)
+    queryChecktests
 
 iType = CInt 0
 dType = CDouble 0
@@ -134,33 +134,33 @@ cellParseTests =
     , ((bType, "True")       , Just (CBool True))
     ]
 
-testCellParse = map
+testCellParse = testOn
     (\(number, ((in1, in2), expected)) -> assertEq
         (parseCell in1 in2)
         expected
         ("Test number (1-indexed): CellParse - " ++ show number)
     )
-    (zip [1 ..] cellParseTests)
+    cellParseTests
 
-createEvalTest lctor rctor left op right = 
+createEvalTest lctor rctor left op right =
     Operation (Const (lctor left)) op (Const (rctor right))
 
 evalInt = createEvalTest CInt CInt
-evalDouble = createEvalTest CDouble CDouble 
+evalDouble = createEvalTest CDouble CDouble
 evalBool = createEvalTest CBool CBool
 
 
-exprEvalNoTableTests = 
+exprEvalNoTableTests =
     [
-        ( 
+        (
             evalInt 3 add 2,
             CInt 5
         ),
-        ( 
+        (
             evalDouble 3 add 2,
             CDouble 5
         ),
-        ( 
+        (
             evalDouble 2 sub 3,
             CDouble (-1)
         ),
@@ -174,11 +174,11 @@ exprEvalNoTableTests =
         ),
         (
             evalBool True boolAnd False,
-            CBool False 
+            CBool False
         ),
         (
             evalBool True boolOr False,
-            CBool True 
+            CBool True
         ),
         (
             createEvalTest CInt CDouble 2 sub 5,
@@ -190,15 +190,19 @@ exprEvalNoTableTests =
         )
     ]
 
-testEvalNoTable = map
+testEvalNoTable :: [IO ()]
+testEvalNoTable = testOn 
     (\(number, (input, expected)) -> assertEq
         (evalExpr [] [] input)
         expected
         ("Test number (1-indexed): EvalExpr - no schema/table - " ++ show number)
     )
-    (zip [1 ..] exprEvalNoTableTests)
+    exprEvalNoTableTests
+
+testOn :: ((Int, a) -> b) -> [a] -> [b]
+testOn fn = zipWith (curry fn) [1..]
 
 main = do
-    last testQueryCheck
-    last testCellParse
-    last testEvalNoTable
+    foldl (>>) (putStr "") testQueryCheck
+    foldl (>>) (putStr "") testCellParse
+    foldl (>>) (putStr "") testEvalNoTable
