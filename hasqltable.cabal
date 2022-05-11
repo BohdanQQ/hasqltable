@@ -40,6 +40,6 @@ Test-Suite test-hasqltable
     hs-source-dirs: app
     type:       exitcode-stdio-1.0
     main-is:    test.hs
-    other-modules: Types
-    build-depends: base, text
+    other-modules: Types, Parser, Operations
+    build-depends: base, text, split
     default-language: Haskell2010
