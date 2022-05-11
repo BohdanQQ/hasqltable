@@ -177,7 +177,7 @@ queryCheckLimit _ =
 
 queryCheckOrderBy :: Query -> (Bool, String)
 queryCheckOrderBy [] = (True, "")
-queryCheckOrderBy ((OrderBy cols) : rest) | null cols = (False, "Empty OrderBy")
+queryCheckOrderBy ((OrderBy (_, cols)) : rest) | null cols = (False, "Empty OrderBy")
                                           | otherwise = queryCheckLimit rest
 queryCheckOrderBy list = propagateIfErr $ queryCheckLimit list
 
