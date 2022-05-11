@@ -113,34 +113,32 @@ parseWithSchema = zipWith parser
 --- QUERY PARSING
 -------
 
+parseSequenceWithAccumulation :: [Parser SubQuery] -> Parser [SubQuery ]
+parseSequenceWithAccumulation parsers@(p:ps) =
+    p >>= (\result -> whitespace >> parseSequenceWithAccumulation ps >>= (\sndRes -> parserPure (result:sndRes)))
+parseSequenceWithAccumulation [] = parserPure []
+
 clauses = ["select", "where", "groupby", "orderby", "limit"]
 
 parseQuery :: String -> Maybe [SubQuery]
-parseQuery q = case res of 
+parseQuery q = case res of
     (Just (result, rest)) -> if null rest then Just result else Nothing
     Nothing -> Nothing
   where
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
-      -- TODO: fold this
     p =
-        (   parseSelect
-            >>= (\select ->
-                    whitespace
-                        >>  parseLimit
-                        >>= (\limit -> parserPure (select ++ limit))
-                )
-            )
-            `orElse` parseSelect
+        parseSequenceWithAccumulation [parseSelect, parseLimit]
+        `orElse` parseSequenceWithAccumulation [parseSelect]
 parseSelect =
     Parser.lowerUpperString "SELECT "
         >>  whitespace
         >>  colListParser
-        >>= (\match -> parserPure [Select match])
+        >>= (parserPure . Select)
 parseLimit =
     Parser.lowerUpperString "LIMIT "
         >>  whitespace
         >>  positiveInteger
-        >>= (\match -> parserPure [Limit (read match)])
+        >>= (parserPure . Limit . read)
 
 positiveInteger = some (Parser.satisfy (\c -> c `elem` ['0' .. '9']))
 
