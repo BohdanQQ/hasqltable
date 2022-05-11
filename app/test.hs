@@ -6,7 +6,7 @@ import           Data.Text                      ( isInfixOf
                                                 )
 import           System.Exit                    ( exitFailure )
 import           Types
-
+import  Operations
 
 printAndExit message = do
     putStrLn message
@@ -191,7 +191,7 @@ exprEvalNoTableTests =
     ]
 
 testEvalNoTable :: [IO ()]
-testEvalNoTable = testOn 
+testEvalNoTable = testOn
     (\(number, (input, expected)) -> assertEq
         (evalExpr [] [] input)
         expected
@@ -199,10 +199,82 @@ testEvalNoTable = testOn
     )
     exprEvalNoTableTests
 
+parseSelectTests = [
+    (
+        parseQuery "SELECT x",
+        Just [Select ["x"]]
+    ),
+    (
+        parseQuery "select x",
+        Just [Select ["x"]]
+    ),
+    (
+        parseQuery "sElEcT x",
+        Just [Select ["x"]]
+    ),
+        (
+        parseQuery "SELECT x, y",
+        Just [Select ["x", "y"]]
+    ),
+        (
+        parseQuery "SELECT x    , y     ",
+        Just [Select ["x", "y"]]
+    ),
+        (
+        parseQuery "SELECT x, `y`, `z`",
+        Just [Select ["x", "y", "z"]]
+    ),
+        (
+        parseQuery "SELECT x,   `y`,   `z`",
+        Just [Select ["x", "y", "z"]]
+    ),
+        (
+        parseQuery "SELECT where",
+        Nothing
+    ),
+    (
+        parseQuery "selec where",
+        Nothing
+    ),
+    (
+        parseQuery "select `x`",
+        Just [Select ["x"]]
+    ),
+    (
+        parseQuery "SELECT x LIMIT 23",
+        Just [Select ["x"], Limit 23]
+    ),
+    (
+        parseQuery "SELECT x, y, `z`, `LIMIT` LIMIT 5",
+        Just [Select ["x", "y", "z", "LIMIT"], Limit 5]
+    ),
+    (
+        parseQuery "SELECT x, y, `z`, LIMIT 5",
+        Nothing
+    ),
+    (
+        parseQuery "SELECT x, y LIMIT -5",
+        Nothing
+    )
+    ]
+
+testParseSelect = testOn
+    (\(number, (input, expected)) -> assertEq input expected
+        ("Test number (1-indexed): parseSelect - no schema/table - " ++ show number)
+    )
+    parseSelectTests
+
+
 testOn :: ((Int, a) -> b) -> [a] -> [b]
 testOn fn = zipWith (curry fn) [1..]
 
+runTests :: [IO ()] -> IO ()
+runTests = foldl (>>) (putStr "")
+
+
+main :: IO ()
 main = do
-    foldl (>>) (putStr "") testQueryCheck
-    foldl (>>) (putStr "") testCellParse
-    foldl (>>) (putStr "") testEvalNoTable
+    runTests testQueryCheck
+    runTests testCellParse
+    runTests testEvalNoTable
+    runTests testParseSelect

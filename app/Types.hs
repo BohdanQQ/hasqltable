@@ -159,6 +159,23 @@ data SubQuery
   | OrderBy (Order, [String])
   | Limit Integer
 
+instance Eq SubQuery where
+    Select x == Select y = x == y
+    GroupBy x == GroupBy y = x == y
+    OrderBy (Asc, x) == OrderBy (Asc, y) = x == y
+    OrderBy (Desc, x) == OrderBy (Desc, y) = x == y
+    Where (x, _) == Where (y, _) = x == y
+    Limit x == Limit y = x == y
+    _ == _ = False 
+
+instance Show SubQuery where
+    show (Select x) = "Select(" ++ show x ++ ")"
+    show (GroupBy x) = "GroupBy(" ++ show x ++ ")"
+    show (Limit x) = "Limit(" ++ show x ++ ")"
+    show (OrderBy (Asc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
+    show (OrderBy (Desc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
+    show (Where (cols, _)) = "Where(" ++ show cols ++ ", some function)"
+
 type Query = [SubQuery]
 
 propagateIfErr :: (Bool, [Char]) -> (Bool, [Char])

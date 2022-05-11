@@ -115,8 +115,12 @@ parseWithSchema = zipWith parser
 
 clauses = ["select", "where", "groupby", "orderby", "limit"]
 
-parseQuery = runParser p
+parseQuery :: String -> Maybe [SubQuery]
+parseQuery q = case res of 
+    (Just (result, rest)) -> if null rest then Just result else Nothing
+    Nothing -> Nothing
   where
+    res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
       -- TODO: fold this
     p =
         (   parseSelect

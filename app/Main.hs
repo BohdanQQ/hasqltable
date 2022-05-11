@@ -20,10 +20,9 @@ import           Types                          ( Cell(..)
                                                 , unwrapOrErr
                                                 )
 
-printResult t (Just (subqs, rest)) = do
+printResult t (Just subqs) = do
     printResult' (execute subqs (Left t))
-    putStrLn $ "Rest: " ++ rest
-    putStrLn $ "Len: " ++ show (length subqs)
+    print subqs
 printResult _ Nothing = putStrLn "cannot parse query"
 printResult' (Left t) = do
     prettyPrintTable t
