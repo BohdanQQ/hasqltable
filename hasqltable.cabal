@@ -33,7 +33,7 @@ executable hasqltable
     -- other-extensions:
     build-depends:    base ^>=4.14.3.0, split
     hs-source-dirs:   app
-    other-modules:    Types, Operations
+    other-modules:    Types, Operations, Parser
     default-language: Haskell2010
 
 Test-Suite test-hasqltable

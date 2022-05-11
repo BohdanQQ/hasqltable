@@ -1,16 +1,24 @@
 module Operations
     ( prettyPrintTable
     , parseCsv
+    , parseQuery
+    , execute
     ) where
-import           Data.List                      ( nub
+import           Data.Char                      ( isSpace )
+import           Data.List                      ( elemIndex
+                                                , intercalate
+                                                , intersperse
+                                                , nub
                                                 , transpose
                                                 )
 import           Data.List.Split                ( splitOn )
+import           Data.Maybe
+import qualified GHC.Unicode                   as Char
+import           Parser
 import           System.IO                      ( Handle
                                                 , hGetContents
                                                 )
 import           Types
-import qualified GHC.Unicode as Char
 
 ------------
 --- PRINTING
@@ -24,7 +32,6 @@ prettyPrintCell (CBool   i) = show i
 prettyPrintTable :: Table -> IO ()
 prettyPrintTable (schema, rowgroups) = do
     prettyPrintSchema schema colSizes
-    putStrLn ""
     mapM_ (`prettyPrintSingleGroup` colSizes) rowgroups
   where
     schemaColLengths = map (length . fst) schema
@@ -38,18 +45,16 @@ padTo padding what string =
 
 
 prettyPrintSchema :: [(String, Cell)] -> [Int] -> IO ()
-prettyPrintSchema schema padding =
-    mapM_ (\(s, p) -> putStr (padTo p ' ' (fst s) ++ "|")) (zip schema padding)
+prettyPrintSchema schema padding = putStrLn
+    $ intercalate "|" (zipWith (\s p -> padTo p ' ' (fst s)) schema padding)
 
 prettyPrintSingleGroup :: [Row] -> [Int] -> IO ()
 prettyPrintSingleGroup rows padding = mapM_ (prettyPrintRow padding) rows
 
 prettyPrintRow :: [Int] -> Row -> IO ()
-prettyPrintRow padding row = do
-    mapM_
-        (\(cell, pad) -> putStr (padTo pad ' ' (prettyPrintCell cell) ++ "|"))
-        (zip row padding)
-    putStrLn ""
+prettyPrintRow padding row = putStrLn $ intercalate
+    "|"
+    (zipWith (\cell pad -> padTo pad ' ' (prettyPrintCell cell)) row padding)
 
 -----------------
 ---TABLES PARSING
@@ -103,3 +108,96 @@ parseWithSchema = zipWith parser
         ++ typeOfCell cellTemplate
         )
         (parseCell cellTemplate cellValue)
+
+-------
+--- QUERY PARSING
+-------
+
+clauses = ["select", "where", "groupby", "orderby", "limit"]
+
+parseQuery = runParser p
+  where
+      -- TODO: fold this
+    p =
+        (   parseSelect
+            >>= (\select ->
+                    whitespace
+                        >>  parseLimit
+                        >>= (\limit -> parserPure (select ++ limit))
+                )
+            )
+            `orElse` parseSelect
+parseSelect =
+    Parser.lowerUpperString "SELECT "
+        >>  whitespace
+        >>  colListParser
+        >>= (\match -> parserPure [Select match])
+parseLimit =
+    Parser.lowerUpperString "LIMIT "
+        >>  whitespace
+        >>  positiveInteger
+        >>= (\match -> parserPure [Limit (read match)])
+
+positiveInteger = some (Parser.satisfy (\c -> c `elem` ['0' .. '9']))
+
+-- word(,word)*
+colListParser =
+    word
+        >>= (\matchedWord ->
+                many spacedWord
+                    >>= (\matchedWords ->
+                            parserPure (matchedWord : matchedWords)
+                        )
+            )
+--[ws],[ws]word
+spacedWord = Parser.whitespace >> string "," >> Parser.whitespace >> word
+-- word OR `word`
+word =
+    notClause
+        `orElse` (   Parser.string "`"
+                 >>  pureWord
+                 >>= (\match -> Parser.string "`" >> parserPure match)
+                 )
+pureWord = Parser.some
+    (Parser.satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
+notClause =
+    pureWord
+        >>= (\match -> if map Char.toLower match `elem` clauses
+                then Parser.failure
+                else parserPure match
+            )
+
+
+execute query table = foldl exec table query
+  where
+    exec (Left  table) qry = executeQuery table qry
+    exec (Right error) _   = Right error
+
+type QueryResult = Either Table String
+
+
+------
+--- SELECT
+------
+executeQuery :: Table -> SubQuery -> QueryResult
+executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
+    then Left (newSchema, extractedRows)
+    else Right err0
+  where
+    schemaCols       = map fst schema
+    mbSchemaIndicies = zip cols (map (flip elemIndex schemaCols) cols)
+    invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
+    err0             = if null invalidCols
+        then ""
+        else "Invalid columns " ++ intercalate "," invalidCols ++ " requested"
+    schemaIndicies = map (\(_, Just x) -> x) mbSchemaIndicies
+    newSchema      = map (schema !!) schemaIndicies
+    extractedRows  = map rowMapper rowgroups
+    rowMapper rows = map (\x -> map (x !!) schemaIndicies) rows
+
+------
+--- LIMIT
+------
+executeQuery (schema, rowgroups) (Limit rowCount) =
+    Left (schema, [take (fromInteger rowCount) (concat rowgroups)])
+
