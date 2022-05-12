@@ -54,12 +54,8 @@ queryChecktests =
     , ( -- invalid start
        queryCheck [Limit 2]         , (False, "begin"))
     , (queryCheck [Select ["aleph"]], (True, ""))
-    , ( queryCheck [Select ["aleph"], Where (["x", "a"], const False)]
+    , ( queryCheck [Select ["aleph"], Where (Const (CBool False))]
       , (True, "")
-      )
-    , ( -- no duplicates in where
-        queryCheck [Select ["aleph"], Where (["aaa", "aaa"], const False)]
-      , (False, "duplicate")
       )
     , (queryCheck [Select ["aleph"], GroupBy ["", "a"]], (True, ""))
     , ( -- empty groupby
@@ -71,7 +67,7 @@ queryChecktests =
        queryCheck [Select ["aleph"], Limit (-1)]       , (False, "nonnegative"))
     , ( queryCheck
           [ Select ["aleph"]
-          , Where (["", "a"], const False)
+          , Where (Const (CBool False))
           , GroupBy ["alpeh"]
           , OrderBy (Asc, ["a"])
           , Limit 1
@@ -81,7 +77,7 @@ queryChecktests =
     , ( -- empty orderBy
         queryCheck
           [ Select ["aleph"]
-          , Where (["", "a"], const False)
+          , Where (Const (CBool False))
           , GroupBy ["alpeh"]
           , OrderBy (Asc, [])
           , Limit 1
@@ -91,7 +87,7 @@ queryChecktests =
     , ( -- duplicate clause
         queryCheck
           [ Select ["aleph"]
-          , Where (["", "a"], const False)
+          , Where (Const (CBool False))
           , GroupBy ["alpeh"]
           , GroupBy ["alpeh"]
           , OrderBy (Desc, ["a"])
@@ -102,7 +98,7 @@ queryChecktests =
     , ( -- invalid order, invalid having position
         queryCheck
           [ Select ["aleph"]
-          , Where (["", "a"], const False)
+          , Where (Const (CBool False))
           , OrderBy (Asc, ["a"])
           , Limit 1
           , OrderBy (Asc, ["a"])

@@ -154,7 +154,7 @@ data Order = Asc | Desc
 
 data SubQuery
   = Select [String]
-  | Where ([String], [Cell] -> Bool) -- lengths of arrays are the same, cells are in the same order as the column names
+  | Where Expr -- lengths of arrays are the same, cells are in the same order as the column names
   | GroupBy [String]
   | OrderBy (Order, [String])
   | Limit Integer
@@ -164,7 +164,7 @@ instance Eq SubQuery where
     GroupBy x == GroupBy y = x == y
     OrderBy (Asc, x) == OrderBy (Asc, y) = x == y
     OrderBy (Desc, x) == OrderBy (Desc, y) = x == y
-    Where (x, _) == Where (y, _) = x == y
+    Where x == Where y = x == y
     Limit x == Limit y = x == y
     _ == _ = False 
 
@@ -174,7 +174,7 @@ instance Show SubQuery where
     show (Limit x) = "Limit(" ++ show x ++ ")"
     show (OrderBy (Asc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
     show (OrderBy (Desc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
-    show (Where (cols, _)) = "Where(" ++ show cols ++ ", some function)"
+    show (Where e) = "Where(" ++ (show e) ++ ")"
 
 type Query = [SubQuery]
 
@@ -206,10 +206,7 @@ queryCheckGroupBy list = propagateIfErr $ queryCheckOrderBy list
 
 queryCheckWhere :: Query -> (Bool, String)
 queryCheckWhere [] = (True, "")
-queryCheckWhere ((Where (cols, func)) : rest)
-    | noDuplicates = queryCheckGroupBy rest
-    | otherwise = (False, "No need to have duplicate columns in where clause")
-    where noDuplicates = nub cols == cols
+queryCheckWhere ((Where _):list) = propagateIfErr $ queryCheckGroupBy list
 queryCheckWhere list = propagateIfErr $ queryCheckGroupBy list
 
 queryCheck :: Query -> (Bool, String)
@@ -225,6 +222,17 @@ data Expr
     = Col String
     | Const Cell
     | Operation {left :: Expr, op :: Cell -> Cell -> Cell, right :: Expr}
+
+instance Show Expr where
+    show (Col c) = "ColExpr(" ++ show c ++ ")"
+    show (Const c) = "ConsExpr(" ++ show c ++ ")"
+    show (Operation l _ r) = "(" ++ show l ++ "?" ++ show r ++ ")"
+
+instance Eq Expr where
+    (Col c) == (Col d) = c == d
+    (Const c) == (Const d) = c == d
+    (Operation l _ r) == (Operation l1 _ r1) = l == l1 && r == r1
+    _ == _ = False
 
 ensureAndContinue
     :: String

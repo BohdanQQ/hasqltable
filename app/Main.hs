@@ -1,4 +1,5 @@
 module Main where
+import           Control.Monad                  ( forever )
 import           Data.List
 import           Data.List.Split
 import           Operations                     ( execute
@@ -10,6 +11,7 @@ import           System.Environment
 import           System.IO
 import           Types                          ( Cell(..)
                                                 , Expr(..)
+                                                , Order(..)
                                                 , add
                                                 , div
                                                 , evalExpr
@@ -21,8 +23,8 @@ import           Types                          ( Cell(..)
                                                 )
 
 printResult t (Just subqs) = do
-    printResult' (execute subqs (Left t))
     print subqs
+    printResult' (execute subqs (Left t))
 printResult _ Nothing = putStrLn "cannot parse query"
 printResult' (Left t) = do
     prettyPrintTable t
@@ -37,9 +39,11 @@ main = do
     table  <- parseCsv parserProperty schemaDesc handle
     putStrLn ""
     prettyPrintTable table
-    ln <- getLine
-    putStrLn "RESULT"
-    printResult table (parseQuery ln)
+
+    forever
+        (   getLine
+        >>= (\ln -> putStrLn "RESULT" >> printResult table (parseQuery ln))
+        )
     -- putStrLn
     --     (  "expr: "
     --     ++ (show

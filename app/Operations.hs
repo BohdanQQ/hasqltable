@@ -39,14 +39,23 @@ prettyPrintTable (schema, rowgroups) = do
                            (transpose (concat rowgroups))
     colSizes = zipWith max maxLenPerCol schemaColLengths
 
-padTo :: Int -> Char -> String -> String
-padTo padding what string =
-    " " ++ string ++ replicate (padding - length string) what ++ " "
+padTo :: Int -> Char -> String -> String -> String
+padTo padding what string extra =
+    extra ++ string ++ replicate (padding - length string) what ++ extra
 
 
 prettyPrintSchema :: [(String, Cell)] -> [Int] -> IO ()
-prettyPrintSchema schema padding = putStrLn
-    $ intercalate "|" (zipWith (\s p -> padTo p ' ' (fst s)) schema padding)
+prettyPrintSchema schema padding = do
+    putStrLn $ intercalate
+        "|"
+        (zipWith (\s p -> padTo p ' ' (fst s) " ") schema padding)
+    putStrLn $ intercalate
+        "+"
+        (zipWith (\s p -> padTo p '-' (replicate (length (fst s)) '-') "-")
+                 schema
+                 padding
+        )
+
 
 prettyPrintSingleGroup :: [Row] -> [Int] -> IO ()
 prettyPrintSingleGroup rows padding = mapM_ (prettyPrintRow padding) rows
@@ -54,7 +63,8 @@ prettyPrintSingleGroup rows padding = mapM_ (prettyPrintRow padding) rows
 prettyPrintRow :: [Int] -> Row -> IO ()
 prettyPrintRow padding row = putStrLn $ intercalate
     "|"
-    (zipWith (\cell pad -> padTo pad ' ' (prettyPrintCell cell)) row padding)
+    (zipWith (\cell pad -> padTo pad ' ' (prettyPrintCell cell) " ") row padding
+    )
 
 -----------------
 ---TABLES PARSING
@@ -113,7 +123,7 @@ parseWithSchema = zipWith parser
 --- QUERY PARSING
 -------
 
-parseSequenceWithAccumulation :: [Parser SubQuery] -> Parser [SubQuery]
+parseSequenceWithAccumulation :: [Parser a] -> Parser [a]
 parseSequenceWithAccumulation parsers@(p : ps) =
     p
         >>= (\result ->
@@ -131,8 +141,13 @@ parseQuery q = case res of
     Nothing               -> Nothing
   where
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
-    p   = parseSequenceWithAccumulation [parseSelect, parseLimit]
-        `orElse` parseSequenceWithAccumulation [parseSelect]
+    p =
+        parseSequenceWithAccumulation
+                [parseSelect, parseSimpleWhere, parseLimit]
+            `orElse` parseSequenceWithAccumulation
+                         [parseSelect, parseSimpleWhere]
+            `orElse` parseSequenceWithAccumulation [parseSelect, parseLimit]
+            `orElse` parseSequenceWithAccumulation [parseSelect]
 parseSelect =
     Parser.lowerUpperString "SELECT "
         >>  whitespace
@@ -143,9 +158,99 @@ parseLimit =
         >>  whitespace
         >>  positiveInteger
         >>= (parserPure . Limit . read)
+parseSimpleWhere =
+    Parser.lowerUpperString "WHERE "
+        >>  whitespace
+        >>  simpleExpr
+        >>= (\e -> whitespace >> parserPure (Where e))
 
+termExpr =
+    (escapedWord >>= (parserPure . Col))
+        `orElse` (  Parser.lowerUpperString "true"
+                 >> parserPure (Const (CBool True))
+                 )
+        `orElse` (  Parser.lowerUpperString "false"
+                 >> parserPure (Const (CBool False))
+                 )
+        `orElse` (integer >>= (parserPure . Const . CInt . read))
+        `orElse` (stringLiteral >>= (parserPure . Const . CStr))
+        `orElse` (double >>= (parserPure . Const . CDouble . read))
+        -- TODO operation literals    
+
+opExpr :: Parser Expr
+opExpr =
+    termExpr
+        >>= (\lexpr ->
+                whitespace
+                    >>  arithOperation
+                    >>= (\op ->
+                            whitespace
+                                >>  termExpr
+                                >>= (parserPure . Operation lexpr op)
+                        )
+            )
+
+sideExpr :: Parser Expr
+sideExpr = opExpr `orElse` termExpr
+
+simpleExpr :: Parser Expr
+simpleExpr =
+    -- (a+b) == "c"
+    (   sideExpr
+        >>= (\lexpr ->
+                whitespace
+                    >>  whereOperation
+                    >>= (\op ->
+                            whitespace
+                                >>  sideExpr
+                                >>= (parserPure . Operation lexpr op)
+                        )
+            )
+        )
+        `orElse`
+    -- just term
+                 termExpr
+
+arithOperation :: Parser (Cell -> Cell -> Cell)
+arithOperation =
+    (string "+" >> parserPure add)
+        `orElse` (string "-" >> parserPure sub)
+        `orElse` (string "*" >> parserPure mul)
+        `orElse` (string "/" >> parserPure Types.div)
+
+whereOperation :: Parser (Cell -> Cell -> Cell)
+whereOperation =
+    (string "&" >> parserPure boolAnd)
+        `orElse` (string "|" >> parserPure boolOr)
+        `orElse` (string "<=" >> parserPure (\a b -> CBool (a <= b)))
+        `orElse` (string "<" >> parserPure (\a b -> CBool (a < b)))
+        `orElse` (string ">=" >> parserPure (\a b -> CBool (a >= b)))
+        `orElse` (string ">" >> parserPure (\a b -> CBool (a > b)))
+        `orElse` (string "==" >> parserPure (\a b -> CBool (a == b)))
+
+stringLiteral :: Parser [Char]
+stringLiteral =
+    string "\""
+        >>  some (satisfy (\x -> x `notElem` ['"', '\n']))
+        >>= (\res -> string "\"" >> parserPure res)
+
+double :: Parser [Char]
+double =
+    (parseSequenceWithAccumulation [integer, string ".", positiveInteger]
+        `orElse` parseSequenceWithAccumulation [integer]
+        )
+        >>= (parserPure . concat)
+
+integer :: Parser [Char]
+integer = negativeInteger `orElse` positiveInteger
+positiveInteger :: Parser [Char]
 positiveInteger = some (Parser.satisfy (\c -> c `elem` ['0' .. '9']))
-
+negativeInteger :: Parser [Char]
+negativeInteger =
+    string "-"
+        >>  whitespace
+        >>  positiveInteger
+        >>= (\res -> parserPure ('-' : res))
 -- word(,word)*
 colListParser =
     word
@@ -157,13 +262,12 @@ colListParser =
             )
 --[ws],[ws]word
 spacedWord = Parser.whitespace >> string "," >> Parser.whitespace >> word
+escapedWord =
+    Parser.string "`"
+        >>  pureWord
+        >>= (\match -> Parser.string "`" >> parserPure match)
 -- word OR `word`
-word =
-    notClause
-        `orElse` (   Parser.string "`"
-                 >>  pureWord
-                 >>= (\match -> Parser.string "`" >> parserPure match)
-                 )
+word = notClause `orElse` escapedWord
 pureWord = Parser.some
     (Parser.satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
 notClause =
@@ -231,6 +335,22 @@ executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
     sortedRows = foldl folder (Left rows) columns
     folder (Left  cells) column = orderByOne schemaCols column cells comparer
     folder (Right msg  ) column = Right msg
+
+------
+--- WHERE
+------
+executeQuery (schema, rowgroups) (Where expr) = Left (schema, [filteredRows])
+  where
+    rows       = concat rowgroups
+    resultRows = map
+        (\r ->
+            (evalExpr schema r (Operation expr boolAnd (Const (CBool True))), r)
+        )
+        rows
+    filteredRows = map snd (filter (okResult . fst) resultRows)
+    okResult res = case res of
+        (CBool x) -> x
+        _         -> False
 
 orderByOne
     :: [String]
