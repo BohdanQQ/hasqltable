@@ -4,12 +4,15 @@ module Operations
     , parseQuery
     , execute
     ) where
-import           Data.Char                      ( isSpace )
+import           Data.Char                      ( isSpace
+                                                , toLower
+                                                )
 import           Data.List                      ( elemIndex
+                                                , groupBy
                                                 , intercalate
                                                 , intersperse
                                                 , nub
-                                                , transpose
+                                                , transpose, sortBy
                                                 )
 import           Data.List.Split                ( splitOn )
 import           Data.Maybe
@@ -123,16 +126,23 @@ parseWithSchema = zipWith parser
 --- QUERY PARSING
 -------
 
-parseSequenceWithAccumulation :: [Parser a] -> Parser [a]
+-- accumulates the results of parsers into an array
+-- all parsers must pass in order for this parser to produce a value
+parseSequenceWithAccumulation :: [Parser (Maybe a)] -> Parser [a]
 parseSequenceWithAccumulation parsers@(p : ps) =
     p
         >>= (\result ->
                 whitespace
                     >>  parseSequenceWithAccumulation ps
-                    >>= (\sndRes -> parserPure (result : sndRes))
+                    >>= (\sndRes -> parserPure (extract result ++ sndRes))
             )
+  where
+    extract (Just x) = [x]
+    extract _        = []
 parseSequenceWithAccumulation [] = parserPure []
 
+-- the lowercase variants of the clauses used in the query syntax
+clauses :: [[Char]]
 clauses = ["select", "where", "groupby", "orderby", "limit"]
 
 parseQuery :: String -> Maybe [SubQuery]
@@ -141,42 +151,73 @@ parseQuery q = case res of
     Nothing               -> Nothing
   where
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
-    p =
-        parseSequenceWithAccumulation
-                [parseSelect, parseSimpleWhere, parseLimit]
-            `orElse` parseSequenceWithAccumulation
-                         [parseSelect, parseSimpleWhere]
-            `orElse` parseSequenceWithAccumulation [parseSelect, parseLimit]
-            `orElse` parseSequenceWithAccumulation [parseSelect]
+    p   = parseSequenceWithAccumulation
+        (wrapWithJust parseSelect : safeSubqueries)
+    notMandCombSubqueries = [parseSimpleWhere, parseOrderBy, parseLimit]
+    safeSubqueries        = map safeSubquerryMapper notMandCombSubqueries
+    safeSubquerryMapper p = wrapWithJust p `orElse` parserPure Nothing
+
+--subquery parsers
+
+parseSelect :: Parser SubQuery
 parseSelect =
-    Parser.lowerUpperString "SELECT "
+    lowerUpperString "SELECT "
         >>  whitespace
         >>  colListParser
         >>= (parserPure . Select)
+
+parseLimit :: Parser SubQuery
 parseLimit =
-    Parser.lowerUpperString "LIMIT "
+    lowerUpperString "LIMIT "
         >>  whitespace
         >>  positiveInteger
         >>= (parserPure . Limit . read)
+
+parseSimpleWhere :: Parser SubQuery
 parseSimpleWhere =
-    Parser.lowerUpperString "WHERE "
+    lowerUpperString "WHERE "
         >>  whitespace
         >>  simpleExpr
         >>= (\e -> whitespace >> parserPure (Where e))
 
-termExpr =
-    (escapedWord >>= (parserPure . Col))
-        `orElse` (  Parser.lowerUpperString "true"
-                 >> parserPure (Const (CBool True))
-                 )
+parseOrderBy :: Parser SubQuery
+parseOrderBy =
+    lowerUpperString "ORDERBY "
+        >>  whitespace
+        >>  parseSequenceWithAccumulation
+                [wrapWithJust orderByOrderWs, wrapWithJust colListParser]
+        >>= (\[[order], columns] ->
+                whitespace >> parserPure (OrderBy (getOrder order, columns))
+            )
+
+wrapWithJust :: Parser a -> Parser (Maybe a)
+wrapWithJust p = p >>= (parserPure . Just)
+getOrder :: [Char] -> Order
+getOrder o = if map toLower o == "asc" then Asc else Desc
+
+orderByOrderWs :: Parser [[Char]]
+orderByOrderWs =
+    (lowerUpperString "asc" `orElse` lowerUpperString "desc")
+        >>= (\ord -> whitespace >> parserPure [ord])
+
+boolExpr :: Parser Expr
+boolExpr =
+    (Parser.lowerUpperString "true" >> parserPure (Const (CBool True)))
         `orElse` (  Parser.lowerUpperString "false"
                  >> parserPure (Const (CBool False))
                  )
+
+-- parses terminal expression of the where clause expression
+termExpr :: Parser Expr
+termExpr =
+    (escapedWord >>= (parserPure . Col))
+        `orElse` boolExpr
         `orElse` (integer >>= (parserPure . Const . CInt . read))
         `orElse` (stringLiteral >>= (parserPure . Const . CStr))
         `orElse` (double >>= (parserPure . Const . CDouble . read))
         -- TODO operation literals    
 
+-- parses (leftTerminalExpr op rightTerminalExpr)-type expression 
 opExpr :: Parser Expr
 opExpr =
     termExpr
@@ -190,9 +231,15 @@ opExpr =
                         )
             )
 
+-- parses one side of the where clause expression
 sideExpr :: Parser Expr
 sideExpr = opExpr `orElse` termExpr
 
+-- parses the entire where clause expression
+-- (a op b) (boolOp) (c op d)
+-- a (boolOp) b
+-- boolExpr
+-- or a combination
 simpleExpr :: Parser Expr
 simpleExpr =
     -- (a+b) == "c"
@@ -207,10 +254,11 @@ simpleExpr =
                         )
             )
         )
-        `orElse`
-    -- just term
-                 termExpr
+        `orElse` boolExpr
 
+------
+--- EXPRESSION OPERATION PARSERS
+------
 arithOperation :: Parser (Cell -> Cell -> Cell)
 arithOperation =
     (string "+" >> parserPure add)
@@ -222,12 +270,16 @@ whereOperation :: Parser (Cell -> Cell -> Cell)
 whereOperation =
     (string "&" >> parserPure boolAnd)
         `orElse` (string "|" >> parserPure boolOr)
+        `orElse` (string "^" >> parserPure boolXor)
         `orElse` (string "<=" >> parserPure (\a b -> CBool (a <= b)))
         `orElse` (string "<" >> parserPure (\a b -> CBool (a < b)))
         `orElse` (string ">=" >> parserPure (\a b -> CBool (a >= b)))
         `orElse` (string ">" >> parserPure (\a b -> CBool (a > b)))
         `orElse` (string "==" >> parserPure (\a b -> CBool (a == b)))
 
+------
+--- HELPER PARSERS
+------
 stringLiteral :: Parser [Char]
 stringLiteral =
     string "\""
@@ -236,8 +288,12 @@ stringLiteral =
 
 double :: Parser [Char]
 double =
-    (parseSequenceWithAccumulation [integer, string ".", positiveInteger]
-        `orElse` parseSequenceWithAccumulation [integer]
+    (        parseSequenceWithAccumulation
+                [ wrapWithJust integer
+                , wrapWithJust (string ".")
+                , wrapWithJust positiveInteger
+                ]
+        `orElse` parseSequenceWithAccumulation [wrapWithJust integer]
         )
         >>= (parserPure . concat)
 
@@ -251,7 +307,10 @@ negativeInteger =
         >>  whitespace
         >>  positiveInteger
         >>= (\res -> parserPure ('-' : res))
+
+-- parses the select clause column list 
 -- word(,word)*
+colListParser :: Parser [[Char]]
 colListParser =
     word
         >>= (\matchedWord ->
@@ -260,16 +319,23 @@ colListParser =
                             parserPure (matchedWord : matchedWords)
                         )
             )
---[ws],[ws]word
+--[whistepace],[whitespace]word
+spacedWord :: Parser [Char]
 spacedWord = Parser.whitespace >> string "," >> Parser.whitespace >> word
+
+-- word OR `word`
+word :: Parser [Char]
+word = notClause `orElse` escapedWord
+
+--`word`
+escapedWord :: Parser [Char]
 escapedWord =
     Parser.string "`"
         >>  pureWord
         >>= (\match -> Parser.string "`" >> parserPure match)
--- word OR `word`
-word = notClause `orElse` escapedWord
-pureWord = Parser.some
-    (Parser.satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
+
+-- ensures the parsed word is not a form of any clause
+notClause :: Parser [Char]
 notClause =
     pureWord
         >>= (\match -> if map Char.toLower match `elem` clauses
@@ -277,7 +343,15 @@ notClause =
                 else parserPure match
             )
 
+pureWord :: Parser [Char]
+pureWord = Parser.some
+    (Parser.satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
 
+-- executes a query on a table
+execute
+    :: [SubQuery]
+    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
+    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
 execute query table = foldl exec table reorderedQuery
   where
     reorderedQuery = reorderQuery query
@@ -294,8 +368,15 @@ type QueryResult = Either Table String
 
 
 ------
+--- MAIN QUERY EXECUTOR
+------
+------
 --- SELECT
 ------
+executeQuery
+    :: ([(String, Cell)], [[[Cell]]])
+    -> SubQuery
+    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
 executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
     then Left (newSchema, extractedRows)
     else Right err0
@@ -328,8 +409,8 @@ executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
 
   where
     comparer = case order of
-        Asc  -> (>)
-        Desc -> (<)
+        Asc  -> (\a b -> if a < b then LT else if a == b then EQ else GT)
+        Desc -> (\a b -> if a < b then GT else if a == b then EQ else LT)
     schemaCols = map fst schema
     rows       = concat rowgroups
     sortedRows = foldl folder (Left rows) columns
@@ -352,18 +433,48 @@ executeQuery (schema, rowgroups) (Where expr) = Left (schema, [filteredRows])
         (CBool x) -> x
         _         -> False
 
+------
+--- GROUP_BY
+------
+
+executeQuery t@(schema, rowgroups) (GroupBy columns) = case groupedRows of
+    Left  rg  -> Left (schema, [map head rg])
+    Right err -> Right err
+    where groupedRows = createGroupsBy t columns
+
+
+createGroupsBy :: Table -> [String] -> Either [[[Cell]]] [Char]
+createGroupsBy (schema, rowGroups) columns = if null err0
+    then Left groupedRows
+    else Right err0
+  where
+    schemaCols       = map fst schema
+    mbSchemaIndicies = zip columns (map (`elemIndex` schemaCols) columns)
+    invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
+    err0             = if null invalidCols
+        then ""
+        else "Invalid columns " ++ intercalate "," invalidCols ++ " requested"
+    colIdcs     = map (fromJust . snd) mbSchemaIndicies
+    rows        = concat rowGroups
+    groupedRows = Data.List.groupBy (sameOnIdcs colIdcs) rows
+    sameOnIdcs idcs ra rb = all (\i -> (ra !! i) == (rb !! i)) idcs
+
+------
+--- EXECUTOR HELPERS
+------
+
 orderByOne
     :: [String]
     -> String
     -> [[Cell]]
-    -> (Cell -> Cell -> Bool)
+    -> (Cell -> Cell -> Ordering )
     -> Either [[Cell]] String
 orderByOne schema column rows comparer = if isNothing mbColIdx
     then Right $ "Could not found column " ++ column
     else Left sortedRows
   where
     sortedRows =
-        sortWith (\r1 r2 -> comparer (r1 !! colIdx) (r2 !! colIdx)) rows
+        Data.List.sortBy (\r1 r2 -> comparer (r1 !! colIdx) (r2 !! colIdx)) rows
     mbColIdx = elemIndex column schema
     colIdx   = fromJust mbColIdx
 

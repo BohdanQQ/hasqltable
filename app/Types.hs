@@ -244,9 +244,9 @@ ensureAndContinue
 ensureAndContinue desc judge finalFn argl argr
     | judge argl argr = finalFn argl argr
     | otherwise = error
-        (  "Incompatible types for operation "
+        (  "Incompatible types for operation `"
         ++ desc
-        ++ " detected ("
+        ++ "` detected ("
         ++ showCellsWith typeOfCell [argl, argr]
         ++ ")"
         )
@@ -265,6 +265,8 @@ boolAnd =
     ensureAndContinue "and" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
 boolOr =
     ensureAndContinue "or" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
+boolXor =
+    ensureAndContinue "xor" boolCheck (\(CBool a) (CBool b) -> CBool ((a || b) && ((not a) || (not b ))))
 
 unwrapMaybe _      (Just val) = val
 unwrapMaybe errMsg _          = error errMsg
