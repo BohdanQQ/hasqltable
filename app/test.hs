@@ -195,70 +195,134 @@ testEvalNoTable = testOn
     )
     exprEvalNoTableTests
 
-parseSelectTests = [
+nop = (\_ _ -> CBool True)
+parseQueryTests = [
     (
-        parseQuery "SELECT x",
+        "SELECT x",
         Just [Select ["x"]]
     ),
     (
-        parseQuery "select x",
+        "select x",
         Just [Select ["x"]]
     ),
     (
-        parseQuery "sElEcT x",
+        "sElEcT x",
         Just [Select ["x"]]
     ),
         (
-        parseQuery "SELECT x, y",
+        "SELECT x, y",
         Just [Select ["x", "y"]]
     ),
         (
-        parseQuery "SELECT x    , y     ",
+        "SELECT x    , y     ",
         Just [Select ["x", "y"]]
     ),
         (
-        parseQuery "SELECT x, `y`, `z`",
+        "SELECT x, `y`, `z`",
         Just [Select ["x", "y", "z"]]
     ),
         (
-        parseQuery "SELECT x,   `y`,   `z`",
+        "SELECT x,   `y`,   `z`",
         Just [Select ["x", "y", "z"]]
     ),
         (
-        parseQuery "SELECT where",
+        "SELECT where",
         Nothing
     ),
     (
-        parseQuery "selec where",
+        "selec where",
         Nothing
     ),
     (
-        parseQuery "select `x`",
+        
+        "select `x`",
         Just [Select ["x"]]
     ),
     (
-        parseQuery "SELECT x LIMIT 23",
+        "SELECT x LIMIT 23",
         Just [Select ["x"], Limit 23]
     ),
     (
-        parseQuery "SELECT x, y, `z`, `LIMIT` LIMIT 5",
+        "SELECT x, y, `z`, `LIMIT` LIMIT 5",
         Just [Select ["x", "y", "z", "LIMIT"], Limit 5]
     ),
     (
-        parseQuery "SELECT x, y, `z`, LIMIT 5",
+        "SELECT x, y, `z`, LIMIT 5",
         Nothing
     ),
     (
-        parseQuery "SELECT x, y LIMIT -5",
+        "SELECT x, y LIMIT -5",
+        Nothing
+    ),
+    (
+        "select x where `b` == \"b\"",
+        Just [Select ["x"], Where (
+                Operation (Col "b") nop (Const(CStr "b"))
+            )        
+            ]
+    ),
+    (
+        "select x where `a` + 4.5 <= 56.4 / `b`",
+        Just [Select ["x"], Where (
+                Operation (Operation (Col "a") nop (Const (CDouble 4.5) )) nop (Operation (Const (CDouble 56.4)) nop (Col "b"))
+            )        
+        ]
+    ),
+    (
+        "select x where `a` + 4.5 <= 56.4 /",
+        Nothing
+    ),
+    (
+        "select x where `a` + <=",
+        Nothing
+    ),
+    (
+        "select x where `a` <=",
+        Nothing
+    ),
+    (
+        "select x where `a` + 4.5 <= 56.4 / `b` limit 5",
+        Just [Select ["x"], Where (
+                Operation (Operation (Col "a") nop (Const (CDouble 4.5) )) nop (Operation (Const (CDouble 56.4)) nop (Col "b"))
+            ),
+            Limit 5
+        ]
+    ),
+    (
+        "select x orderby asc y",
+        Just [Select ["x"], OrderBy (Asc, ["y"])]
+    ),
+    (
+        "select x orderby asc",
+        Nothing 
+    ),
+    (
+        "select x orderby asc where",
+        Nothing 
+    ),
+    (
+        "select x orderby asc y, z, `alpha`",
+        Just [Select ["x"], OrderBy (Asc, ["y", "z", "alpha"])]
+    ),
+    (
+        "select x orderby asc y, where, `alpha`",
+        Nothing
+    ),
+    (
+        "select x where True orderby asc y, z, `alpha`",
+        Just [Select ["x"], Where (Const (CBool True)), OrderBy (Asc, ["y", "z", "alpha"])]
+    ),
+    (
+        "select x orderby asc y, z, `alpha` where True ",
         Nothing
     )
     ]
 
-testParseSelect = testOn
-    (\(number, (input, expected)) -> assertEq input expected
-        ("Test number (1-indexed): parseSelect - no schema/table - " ++ show number)
+testParseQuery = testOn
+    (\(number, (input, expected)) -> assertEq (parseQuery input) expected
+        ("Test number (1-indexed): parseSelect - no schema/table - " ++ show number ++ " with input\n" ++ input)
     )
-    parseSelectTests
+    parseQueryTests
 
 
 testOn :: ((Int, a) -> b) -> [a] -> [b]
@@ -273,4 +337,4 @@ main = do
     runTests testQueryCheck
     runTests testCellParse
     runTests testEvalNoTable
-    runTests testParseSelect
+    runTests testParseQuery
