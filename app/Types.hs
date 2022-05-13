@@ -160,21 +160,21 @@ data SubQuery
   | Limit Integer
 
 instance Eq SubQuery where
-    Select x == Select y = x == y
-    GroupBy x == GroupBy y = x == y
-    OrderBy (Asc, x) == OrderBy (Asc, y) = x == y
+    Select  x         == Select  y         = x == y
+    GroupBy x         == GroupBy y         = x == y
+    OrderBy (Asc , x) == OrderBy (Asc , y) = x == y
     OrderBy (Desc, x) == OrderBy (Desc, y) = x == y
-    Where x == Where y = x == y
-    Limit x == Limit y = x == y
-    _ == _ = False 
+    Where   x         == Where   y         = x == y
+    Limit   x         == Limit   y         = x == y
+    _                 == _                 = False
 
 instance Show SubQuery where
-    show (Select x) = "Select(" ++ show x ++ ")"
-    show (GroupBy x) = "GroupBy(" ++ show x ++ ")"
-    show (Limit x) = "Limit(" ++ show x ++ ")"
-    show (OrderBy (Asc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
+    show (Select  x        ) = "Select(" ++ show x ++ ")"
+    show (GroupBy x        ) = "GroupBy(" ++ show x ++ ")"
+    show (Limit   x        ) = "Limit(" ++ show x ++ ")"
+    show (OrderBy (Asc , x)) = "OrderBy( ASC, " ++ show x ++ ")"
     show (OrderBy (Desc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
-    show (Where e) = "Where(" ++ (show e) ++ ")"
+    show (Where   e        ) = "Where(" ++ show e ++ ")"
 
 type Query = [SubQuery]
 
@@ -194,8 +194,9 @@ queryCheckLimit _ =
 
 queryCheckOrderBy :: Query -> (Bool, String)
 queryCheckOrderBy [] = (True, "")
-queryCheckOrderBy ((OrderBy (_, cols)) : rest) | null cols = (False, "Empty OrderBy")
-                                          | otherwise = queryCheckLimit rest
+queryCheckOrderBy ((OrderBy (_, cols)) : rest)
+    | null cols = (False, "Empty OrderBy")
+    | otherwise = queryCheckLimit rest
 queryCheckOrderBy list = propagateIfErr $ queryCheckLimit list
 
 queryCheckGroupBy :: Query -> (Bool, String)
@@ -205,9 +206,9 @@ queryCheckGroupBy ((GroupBy cols) : rest) | null cols = (False, "Empty GroupBy")
 queryCheckGroupBy list = propagateIfErr $ queryCheckOrderBy list
 
 queryCheckWhere :: Query -> (Bool, String)
-queryCheckWhere [] = (True, "")
-queryCheckWhere ((Where _):list) = propagateIfErr $ queryCheckGroupBy list
-queryCheckWhere list = propagateIfErr $ queryCheckGroupBy list
+queryCheckWhere []                 = (True, "")
+queryCheckWhere ((Where _) : list) = propagateIfErr $ queryCheckGroupBy list
+queryCheckWhere list               = propagateIfErr $ queryCheckGroupBy list
 
 queryCheck :: Query -> (Bool, String)
 queryCheck [] = (False, "Empty query")
@@ -224,23 +225,24 @@ data Expr
     | Operation {left :: Expr, op :: Cell -> Cell -> Cell, right :: Expr}
 
 instance Show Expr where
-    show (Col c) = "ColExpr(" ++ show c ++ ")"
-    show (Const c) = "ConsExpr(" ++ show c ++ ")"
+    show (Col   c        ) = "ColExpr(" ++ show c ++ ")"
+    show (Const c        ) = "ConsExpr(" ++ show c ++ ")"
     show (Operation l _ r) = "(" ++ show l ++ "?" ++ show r ++ ")"
 
 instance Eq Expr where
-    (Col c) == (Col d) = c == d
-    (Const c) == (Const d) = c == d
+    (Col   c        ) == (Col   d          ) = c == d
+    (Const c        ) == (Const d          ) = c == d
     (Operation l _ r) == (Operation l1 _ r1) = l == l1 && r == r1
-    _ == _ = False
+    _                 == _                   = False
 
+-- TODO: either this?
 ensureAndContinue
     :: String
     -> (Cell -> Cell -> Bool)
-    -> (Cell -> Cell -> Cell)
+    -> (Cell -> Cell -> a)
     -> Cell
     -> Cell
-    -> Cell
+    -> a
 ensureAndContinue desc judge finalFn argl argr
     | judge argl argr = finalFn argl argr
     | otherwise = error
@@ -257,16 +259,36 @@ ensureAndContinue desc judge finalFn argl argr
 boolCheck (CBool _) (CBool _) = True
 boolCheck _         _         = False
 
-add = ensureAndContinue "add" compatibleArith (+)
-mul = ensureAndContinue "multiply" compatibleArith (*)
-sub = ensureAndContinue "subtract" compatibleArith (-)
-div = ensureAndContinue "divide" compatibleArith (/)
+add = ensureAndContinue "+" compatibleArith (+)
+mul = ensureAndContinue "*" compatibleArith (*)
+sub = ensureAndContinue "-" compatibleArith (-)
+div = ensureAndContinue "/" compatibleArith (/)
 boolAnd =
-    ensureAndContinue "and" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
+    ensureAndContinue "&" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
 boolOr =
-    ensureAndContinue "or" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
-boolXor =
-    ensureAndContinue "xor" boolCheck (\(CBool a) (CBool b) -> CBool ((a || b) && ((not a) || (not b ))))
+    ensureAndContinue "|" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
+boolXor = ensureAndContinue
+    "^"
+    boolCheck
+    (\(CBool a) (CBool b) -> CBool ((a || b) && (not a || not b)))
+cellCompareAsc = ensureAndContinue
+    "comparison"
+    compatibleOrd
+    (\a b -> if a < b then LT else if a == b then EQ else GT)
+cellCompareDesc = ensureAndContinue
+    "comparison"
+    compatibleOrd
+    (\a b -> if a < b then GT else if a == b then EQ else LT)
+
+compatibleOrdEq x y = compatibleEq x y && compatibleEq x y
+
+cellLeq = ensureAndContinue "<=" compatibleOrdEq (\a b -> CBool (a <= b))
+cellLe = ensureAndContinue "<" compatibleOrd (\a b -> CBool (a < b))
+cellGeq = ensureAndContinue ">=" compatibleOrdEq (\a b -> CBool (a >= b))
+cellGe = ensureAndContinue ">" compatibleOrd (\a b -> CBool (a > b))
+cellEq = ensureAndContinue "== (equal)" compatibleEq (\a b -> CBool (a == b))
+cellNeq =
+    ensureAndContinue "!= (not equal)" compatibleEq (\a b -> CBool (a /= b))
 
 unwrapMaybe _      (Just val) = val
 unwrapMaybe errMsg _          = error errMsg

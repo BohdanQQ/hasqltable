@@ -154,8 +154,9 @@ parseQuery q = case res of
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
     p   = parseSequenceWithAccumulation
         (wrapWithJust parseSelect : safeSubqueries)
-    notMandCombSubqueries = [parseSimpleWhere, parseGroupBy, parseOrderBy, parseLimit]
-    safeSubqueries        = map safeSubquerryMapper notMandCombSubqueries
+    notMandCombSubqueries =
+        [parseSimpleWhere, parseGroupBy, parseOrderBy, parseLimit]
+    safeSubqueries = map safeSubquerryMapper notMandCombSubqueries
     safeSubquerryMapper p = wrapWithJust p `orElse` parserPure Nothing
 
 --subquery parsers
@@ -279,11 +280,12 @@ whereOperation =
     (string "&" >> parserPure boolAnd)
         `orElse` (string "|" >> parserPure boolOr)
         `orElse` (string "^" >> parserPure boolXor)
-        `orElse` (string "<=" >> parserPure (\a b -> CBool (a <= b)))
-        `orElse` (string "<" >> parserPure (\a b -> CBool (a < b)))
-        `orElse` (string ">=" >> parserPure (\a b -> CBool (a >= b)))
-        `orElse` (string ">" >> parserPure (\a b -> CBool (a > b)))
-        `orElse` (string "==" >> parserPure (\a b -> CBool (a == b)))
+        `orElse` (string "<=" >> parserPure cellLeq)
+        `orElse` (string "<" >> parserPure cellLe)
+        `orElse` (string ">=" >> parserPure cellGeq)
+        `orElse` (string ">" >> parserPure cellGe)
+        `orElse` (string "==" >> parserPure cellEq)
+        `orElse` (string "!=" >> parserPure cellNeq)
 
 ------
 --- HELPER PARSERS
@@ -417,8 +419,8 @@ executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
 
   where
     comparer = case order of
-        Asc  -> (\a b -> if a < b then LT else if a == b then EQ else GT)
-        Desc -> (\a b -> if a < b then GT else if a == b then EQ else LT)
+        Asc  -> cellCompareAsc
+        Desc -> cellCompareDesc
     schemaCols = map fst schema
     rows       = concat rowgroups
     sortedRows = foldl folder (Left rows) columns
