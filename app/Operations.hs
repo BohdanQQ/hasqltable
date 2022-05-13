@@ -12,7 +12,8 @@ import           Data.List                      ( elemIndex
                                                 , intercalate
                                                 , intersperse
                                                 , nub
-                                                , transpose, sortBy
+                                                , sortBy
+                                                , transpose
                                                 )
 import           Data.List.Split                ( splitOn )
 import           Data.Maybe
@@ -153,7 +154,7 @@ parseQuery q = case res of
     res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
     p   = parseSequenceWithAccumulation
         (wrapWithJust parseSelect : safeSubqueries)
-    notMandCombSubqueries = [parseSimpleWhere, parseOrderBy, parseLimit]
+    notMandCombSubqueries = [parseSimpleWhere, parseGroupBy, parseOrderBy, parseLimit]
     safeSubqueries        = map safeSubquerryMapper notMandCombSubqueries
     safeSubquerryMapper p = wrapWithJust p `orElse` parserPure Nothing
 
@@ -190,6 +191,13 @@ parseOrderBy =
                 whitespace >> parserPure (OrderBy (getOrder order, columns))
             )
 
+parseGroupBy :: Parser SubQuery
+parseGroupBy =
+    lowerUpperString "GROUPBY "
+        >>  whitespace
+        >>  colListParser
+        >>= (\columns -> whitespace >> parserPure (GroupBy columns))
+
 wrapWithJust :: Parser a -> Parser (Maybe a)
 wrapWithJust p = p >>= (parserPure . Just)
 getOrder :: [Char] -> Order
@@ -212,9 +220,9 @@ termExpr :: Parser Expr
 termExpr =
     (escapedWord >>= (parserPure . Col))
         `orElse` boolExpr
+        `orElse` (double >>= (parserPure . Const . CDouble . read))
         `orElse` (integer >>= (parserPure . Const . CInt . read))
         `orElse` (stringLiteral >>= (parserPure . Const . CStr))
-        `orElse` (double >>= (parserPure . Const . CDouble . read))
         -- TODO operation literals    
 
 -- parses (leftTerminalExpr op rightTerminalExpr)-type expression 
@@ -467,7 +475,7 @@ orderByOne
     :: [String]
     -> String
     -> [[Cell]]
-    -> (Cell -> Cell -> Ordering )
+    -> (Cell -> Cell -> Ordering)
     -> Either [[Cell]] String
 orderByOne schema column rows comparer = if isNothing mbColIdx
     then Right $ "Could not found column " ++ column
