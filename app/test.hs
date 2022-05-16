@@ -187,15 +187,16 @@ exprEvalNoTableTests =
     ]
 
 testEvalNoTable :: [IO ()]
-testEvalNoTable = testOn
-    (\(number, (input, expected)) -> assertEq
-        (evalExpr [] [] input)
-        expected
-        ("Test number (1-indexed): EvalExpr - no schema/table - " ++ show number)
-    )
-    exprEvalNoTableTests
+testEvalNoTable =  zipWith (curry (\(number, (input, expected)) ->
+    let message = ("Test number (1-indexed): EvalExpr - no schema/table - " ++ show number) in
+        case evalExpr [] [] input of 
+            Left e -> putStrLn (message ++ e) >> exitFailure
+            Right r -> assertEq r expected message
+            )) [1..] exprEvalNoTableTests
 
-nop = (\_ _ -> CBool True)
+
+
+nop = (\_ _ -> Right (CBool True))
 parseQueryTests = [
     (
         "SELECT x",

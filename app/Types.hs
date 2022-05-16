@@ -154,7 +154,7 @@ data Order = Asc | Desc
 
 data SubQuery
   = Select [String]
-  | Where Expr -- lengths of arrays are the same, cells are in the same order as the column names
+  | Where Expr
   | GroupBy [String]
   | OrderBy (Order, [String])
   | Limit Integer
@@ -222,7 +222,7 @@ queryCheck _ = (False, "Query must begin with a Select subquery")
 data Expr
     = Col String
     | Const Cell
-    | Operation {left :: Expr, op :: Cell -> Cell -> Cell, right :: Expr}
+    | Operation {left :: Expr, op :: Cell -> Cell -> Either String Cell, right :: Expr}
 
 instance Show Expr where
     show (Col   c        ) = "ColExpr(" ++ show c ++ ")"
@@ -235,18 +235,16 @@ instance Eq Expr where
     (Operation l _ r) == (Operation l1 _ r1) = l == l1 && r == r1
     _                 == _                   = False
 
--- TODO: either this?
 ensureAndContinue
     :: String
     -> (Cell -> Cell -> Bool)
     -> (Cell -> Cell -> a)
     -> Cell
     -> Cell
-    -> a
+    -> Either String a
 ensureAndContinue desc judge finalFn argl argr
-    | judge argl argr = finalFn argl argr
-    | otherwise = error
-        (  "Incompatible types for operation `"
+    | judge argl argr = Right (finalFn argl argr)
+    | otherwise = Left (  "Incompatible types for operation `"
         ++ desc
         ++ "` detected ("
         ++ showCellsWith typeOfCell [argl, argr]
@@ -255,7 +253,6 @@ ensureAndContinue desc judge finalFn argl argr
 
 
 -- TODO: unary operator support (not, unary -)
---       eq, neq, le, gt
 boolCheck (CBool _) (CBool _) = True
 boolCheck _         _         = False
 
@@ -296,12 +293,12 @@ unwrapMaybe errMsg _          = error errMsg
 getIdxOrErr errMsg row index | length row <= index = error errMsg
                              | otherwise           = row !! index
 
-evalExpr :: Schema -> Row -> Expr -> Cell
-evalExpr schema row (Const cell) = cell
+evalExpr :: Schema -> Row -> Expr -> Either String Cell
+evalExpr schema row (Const cell) = Right cell
 evalExpr schema row (Col colName)
-    | found && areSameType = item
-    | not found = error ("Column " ++ colName ++ " not found in schema")
-    | otherwise = error
+    | found && areSameType = Right item
+    | not found = Left ("Column " ++ colName ++ " not found in schema")
+    | otherwise = Left
         (  "Type "
         ++ typeOfCell item
         ++ " should be (according to schema) "
@@ -316,7 +313,4 @@ evalExpr schema row (Col colName)
     item        = getIdxOrErr "Row does not adhere to schema" row index
     areSameType = typeOfCell item == typeOfCell unwrapped
 
-evalExpr schema row (Operation l op r) = op lres rres
-  where
-    lres = evalExpr schema row l
-    rres = evalExpr schema row r
+evalExpr schema row (Operation l op r) = evalExpr schema row l >>= (\lres -> evalExpr schema row r >>= op lres)

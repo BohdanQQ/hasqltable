@@ -223,8 +223,7 @@ termExpr =
         `orElse` boolExpr
         `orElse` (double >>= (parserPure . Const . CDouble . read))
         `orElse` (integer >>= (parserPure . Const . CInt . read))
-        `orElse` (stringLiteral >>= (parserPure . Const . CStr))
-        -- TODO operation literals    
+        `orElse` (stringLiteral >>= (parserPure . Const . CStr)) 
 
 -- parses (leftTerminalExpr op rightTerminalExpr)-type expression 
 opExpr :: Parser Expr
@@ -268,14 +267,14 @@ simpleExpr =
 ------
 --- EXPRESSION OPERATION PARSERS
 ------
-arithOperation :: Parser (Cell -> Cell -> Cell)
+arithOperation :: Parser (Cell -> Cell -> Either String Cell)
 arithOperation =
     (string "+" >> parserPure add)
         `orElse` (string "-" >> parserPure sub)
         `orElse` (string "*" >> parserPure mul)
         `orElse` (string "/" >> parserPure Types.div)
 
-whereOperation :: Parser (Cell -> Cell -> Cell)
+whereOperation :: Parser (Cell -> Cell -> Either String Cell)
 whereOperation =
     (string "&" >> parserPure boolAnd)
         `orElse` (string "|" >> parserPure boolOr)
@@ -360,13 +359,13 @@ pureWord = Parser.some
 -- executes a query on a table
 execute
     :: [SubQuery]
-    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
-    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
+    -> Either String ([(String, Cell)], [[[Cell]]])
+    -> Either String ([(String, Cell)], [[[Cell]]])
 execute query table = foldl exec table reorderedQuery
   where
     reorderedQuery = reorderQuery query
-    exec (Left  table) qry = executeQuery table qry
-    exec (Right error) _   = Right error
+    exec (Right  table) qry = executeQuery table qry
+    exec (Left error) _   = Left error
     reorderQuery q = sortWith (\a b -> idQ a < idQ b) q
     idQ (Select  _) = 10 -- select as last
     idQ (Limit   _) = 9
@@ -386,10 +385,10 @@ type QueryResult = Either Table String
 executeQuery
     :: ([(String, Cell)], [[[Cell]]])
     -> SubQuery
-    -> Either ([(String, Cell)], [[[Cell]]]) [Char]
+    -> Either String ([(String, Cell)], [[[Cell]]])
 executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
-    then Left (newSchema, extractedRows)
-    else Right err0
+    then Right (newSchema, extractedRows)
+    else Left err0
   where
     schemaCols       = map fst schema
     mbSchemaIndicies = zip cols (map (`elemIndex` schemaCols) cols)
@@ -406,7 +405,7 @@ executeQuery (schema, rowgroups) (Select cols) = if err0 == ""
 --- LIMIT
 ------
 executeQuery (schema, rowgroups) (Limit rowCount) =
-    Left (schema, [take (fromInteger rowCount) (concat rowgroups)])
+    Right (schema, [take (fromInteger rowCount) (concat rowgroups)])
 
 ------
 --- ORDER BY
@@ -414,8 +413,8 @@ executeQuery (schema, rowgroups) (Limit rowCount) =
 
 executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
     case sortedRows of
-        (Left  res) -> Left (schema, [res])
-        (Right err) -> Right err
+        (Right res) -> Right (schema, [res])
+        (Left err) -> Left err
 
   where
     comparer = case order of
@@ -423,14 +422,17 @@ executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
         Desc -> cellCompareDesc
     schemaCols = map fst schema
     rows       = concat rowgroups
-    sortedRows = foldl folder (Left rows) columns
-    folder (Left  cells) column = orderByOne schemaCols column cells comparer
-    folder (Right msg  ) column = Right msg
+    sortedRows = foldl folder (Right rows) columns
+    folder (Right cells) column = orderByOne schemaCols column cells comparer
+    folder (Left msg  ) column = Left msg
 
 ------
 --- WHERE
 ------
-executeQuery (schema, rowgroups) (Where expr) = Left (schema, [filteredRows])
+executeQuery (schema, rowgroups) (Where expr) = case result of
+  Left s -> Left s
+  Right filteredRows -> Right (schema, [filteredRows])
+    
   where
     rows       = concat rowgroups
     resultRows = map
@@ -438,7 +440,13 @@ executeQuery (schema, rowgroups) (Where expr) = Left (schema, [filteredRows])
             (evalExpr schema r (Operation expr boolAnd (Const (CBool True))), r)
         )
         rows
-    filteredRows = map snd (filter (okResult . fst) resultRows)
+    tmp = foldl (\acc (e, _) -> acc >> e) (Right (CBool True) :: Either String Cell) resultRows
+    result = case tmp of
+      Left err -> Left err
+      Right _ ->  Right (map snd (filter (okResult . fromRightUnsafe . fst) resultRows))
+    fromRightUnsafe x = case x of
+        Right e -> e
+        Left _ -> error "Impossible error"
     okResult res = case res of
         (CBool x) -> x
         _         -> False
@@ -448,8 +456,8 @@ executeQuery (schema, rowgroups) (Where expr) = Left (schema, [filteredRows])
 ------
 
 executeQuery t@(schema, rowgroups) (GroupBy columns) = case groupedRows of
-    Left  rg  -> Left (schema, [map head rg])
-    Right err -> Right err
+    Left  rg  -> Right (schema, [map head rg])
+    Right err -> Left err
     where groupedRows = createGroupsBy t columns
 
 
@@ -477,14 +485,16 @@ orderByOne
     :: [String]
     -> String
     -> [[Cell]]
-    -> (Cell -> Cell -> Ordering)
-    -> Either [[Cell]] String
+    -> (Cell -> Cell -> Either String Ordering)
+    -> Either String [[Cell]]
 orderByOne schema column rows comparer = if isNothing mbColIdx
-    then Right $ "Could not found column " ++ column
-    else Left sortedRows
+    then Left $ "Could not find column " ++ column
+    else Right sortedRows
   where
     sortedRows =
-        Data.List.sortBy (\r1 r2 -> comparer (r1 !! colIdx) (r2 !! colIdx)) rows
+        Data.List.sortBy (\r1 r2 -> case comparer (r1 !! colIdx) (r2 !! colIdx) of
+      Left s -> error ("Table parsed into invalid format! Attempted to compare incompatible types: " ++ s)
+      Right ord -> ord ) rows
     mbColIdx = elemIndex column schema
     colIdx   = fromJust mbColIdx
 

@@ -24,12 +24,12 @@ import           Types                          ( Cell(..)
 
 printResult t (Just subqs) = do
     print subqs
-    printResult' (execute subqs (Left t))
+    printResult' (execute subqs (Right t))
 printResult _ Nothing = putStrLn "cannot parse query"
-printResult' (Left t) = do
+printResult' (Left e) = do
+    putStrLn e
+printResult' (Right t) = do
     prettyPrintTable t
-printResult' (Right m) = do
-    putStrLn m
 
 main :: IO ()
 main = do
