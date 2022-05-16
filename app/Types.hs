@@ -244,7 +244,8 @@ ensureAndContinue
     -> Either String a
 ensureAndContinue desc judge finalFn argl argr
     | judge argl argr = Right (finalFn argl argr)
-    | otherwise = Left (  "Incompatible types for operation `"
+    | otherwise = Left
+        (  "Incompatible types for operation `"
         ++ desc
         ++ "` detected ("
         ++ showCellsWith typeOfCell [argl, argr]
@@ -313,4 +314,5 @@ evalExpr schema row (Col colName)
     item        = getIdxOrErr "Row does not adhere to schema" row index
     areSameType = typeOfCell item == typeOfCell unwrapped
 
-evalExpr schema row (Operation l op r) = evalExpr schema row l >>= (\lres -> evalExpr schema row r >>= op lres)
+evalExpr schema row (Operation l op r) =
+    evalExpr schema row l >>= (\lres -> evalExpr schema row r >>= op lres)

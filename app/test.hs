@@ -4,9 +4,9 @@ import           Data.Text                      ( isInfixOf
                                                 , pack
                                                 , toLower
                                                 )
+import           Operations
 import           System.Exit                    ( exitFailure )
 import           Types
-import  Operations
 
 printAndExit message = do
     putStrLn message
@@ -50,13 +50,11 @@ assertEq result ex helper = if result == ex
 
 queryChecktests =
     [ ( -- empty select
-       queryCheck [Select []]       , (False, "empty"))
+       queryCheck [Select []]                          , (False, "empty"))
     , ( -- invalid start
-       queryCheck [Limit 2]         , (False, "begin"))
-    , (queryCheck [Select ["aleph"]], (True, ""))
-    , ( queryCheck [Select ["aleph"], Where (Const (CBool False))]
-      , (True, "")
-      )
+       queryCheck [Limit 2]                            , (False, "begin"))
+    , (queryCheck [Select ["aleph"]]                   , (True, ""))
+    , (queryCheck [Select ["aleph"], Where (Const (CBool False))], (True, ""))
     , (queryCheck [Select ["aleph"], GroupBy ["", "a"]], (True, ""))
     , ( -- empty groupby
        queryCheck [Select ["aleph"], GroupBy []]       , (False, "empty"))
@@ -147,187 +145,112 @@ evalBool = createEvalTest CBool CBool
 
 
 exprEvalNoTableTests =
-    [
-        (
-            evalInt 3 add 2,
-            CInt 5
-        ),
-        (
-            evalDouble 3 add 2,
-            CDouble 5
-        ),
-        (
-            evalDouble 2 sub 3,
-            CDouble (-1)
-        ),
-        (
-            evalDouble 5 Types.div 2,
-            CDouble 2.5
-        ),
-        (
-            evalInt 5 mul 8,
-            CInt 40
-        ),
-        (
-            evalBool True boolAnd False,
-            CBool False
-        ),
-        (
-            evalBool True boolOr False,
-            CBool True
-        ),
-        (
-            createEvalTest CInt CDouble 2 sub 5,
-            CDouble (-3)
-        ),
-        (
-            createEvalTest CDouble CInt 2 Types.div 5,
-            CDouble 0.4
-        )
+    [ (evalInt 3 add 2                          , CInt 5)
+    , (evalDouble 3 add 2                       , CDouble 5)
+    , (evalDouble 2 sub 3                       , CDouble (-1))
+    , (evalDouble 5 Types.div 2                 , CDouble 2.5)
+    , (evalInt 5 mul 8                          , CInt 40)
+    , (evalBool True boolAnd False              , CBool False)
+    , (evalBool True boolOr False               , CBool True)
+    , (createEvalTest CInt CDouble 2 sub 5      , CDouble (-3))
+    , (createEvalTest CDouble CInt 2 Types.div 5, CDouble 0.4)
     ]
 
 testEvalNoTable :: [IO ()]
-testEvalNoTable =  zipWith (curry (\(number, (input, expected)) ->
-    let message = ("Test number (1-indexed): EvalExpr - no schema/table - " ++ show number) in
-        case evalExpr [] [] input of 
-            Left e -> putStrLn (message ++ e) >> exitFailure
-            Right r -> assertEq r expected message
-            )) [1..] exprEvalNoTableTests
+testEvalNoTable = zipWith
+    (curry
+        (\(number, (input, expected)) ->
+            let message =
+                    (  "Test number (1-indexed): EvalExpr - no schema/table - "
+                    ++ show number
+                    )
+            in  case evalExpr [] [] input of
+                    Left  e -> putStrLn (message ++ e) >> exitFailure
+                    Right r -> assertEq r expected message
+        )
+    )
+    [1 ..]
+    exprEvalNoTableTests
 
 
 
 nop = (\_ _ -> Right (CBool True))
-parseQueryTests = [
-    (
-        "SELECT x",
-        Just [Select ["x"]]
-    ),
-    (
-        "select x",
-        Just [Select ["x"]]
-    ),
-    (
-        "sElEcT x",
-        Just [Select ["x"]]
-    ),
-        (
-        "SELECT x, y",
-        Just [Select ["x", "y"]]
-    ),
-        (
-        "SELECT x    , y     ",
-        Just [Select ["x", "y"]]
-    ),
-        (
-        "SELECT x, `y`, `z`",
-        Just [Select ["x", "y", "z"]]
-    ),
-        (
-        "SELECT x,   `y`,   `z`",
-        Just [Select ["x", "y", "z"]]
-    ),
-        (
-        "SELECT where",
-        Nothing
-    ),
-    (
-        "selec where",
-        Nothing
-    ),
-    (
-        
-        "select `x`",
-        Just [Select ["x"]]
-    ),
-    (
-        "SELECT x LIMIT 23",
-        Just [Select ["x"], Limit 23]
-    ),
-    (
-        "SELECT x, y, `z`, `LIMIT` LIMIT 5",
-        Just [Select ["x", "y", "z", "LIMIT"], Limit 5]
-    ),
-    (
-        "SELECT x, y, `z`, LIMIT 5",
-        Nothing
-    ),
-    (
-        "SELECT x, y LIMIT -5",
-        Nothing
-    ),
-    (
-        "select x where `b` == \"b\"",
-        Just [Select ["x"], Where (
-                Operation (Col "b") nop (Const(CStr "b"))
-            )        
-            ]
-    ),
-    (
-        "select x where `a` + 4.5 <= 56.4 / `b`",
-        Just [Select ["x"], Where (
-                Operation (Operation (Col "a") nop (Const (CDouble 4.5) )) nop (Operation (Const (CDouble 56.4)) nop (Col "b"))
-            )        
-        ]
-    ),
-    (
-        "select x where `a` + 4.5 <= 56.4 /",
-        Nothing
-    ),
-    (
-        "select x where `a` + <=",
-        Nothing
-    ),
-    (
-        "select x where `a` <=",
-        Nothing
-    ),
-    (
-        "select x where `a` + 4.5 <= 56.4 / `b` limit 5",
-        Just [Select ["x"], Where (
-                Operation (Operation (Col "a") nop (Const (CDouble 4.5) )) nop (Operation (Const (CDouble 56.4)) nop (Col "b"))
-            ),
-            Limit 5
-        ]
-    ),
-    (
-        "select x orderby asc y",
-        Just [Select ["x"], OrderBy (Asc, ["y"])]
-    ),
-    (
-        "select x orderby asc",
-        Nothing 
-    ),
-    (
-        "select x orderby asc where",
-        Nothing 
-    ),
-    (
-        "select x orderby asc y, z, `alpha`",
-        Just [Select ["x"], OrderBy (Asc, ["y", "z", "alpha"])]
-    ),
-    (
-        "select x orderby asc y, where, `alpha`",
-        Nothing
-    ),
-    (
-        "select x where True orderby asc y, z, `alpha`",
-        Just [Select ["x"], Where (Const (CBool True)), OrderBy (Asc, ["y", "z", "alpha"])]
-    ),
-    (
-        "select x orderby asc y, z, `alpha` where True ",
-        Nothing
-    )
+parseQueryTests =
+    [ ("SELECT x"              , Just [Select ["x"]])
+    , ("select x"              , Just [Select ["x"]])
+    , ("sElEcT x"              , Just [Select ["x"]])
+    , ("SELECT x, y"           , Just [Select ["x", "y"]])
+    , ("SELECT x    , y     "  , Just [Select ["x", "y"]])
+    , ("SELECT x, `y`, `z`"    , Just [Select ["x", "y", "z"]])
+    , ("SELECT x,   `y`,   `z`", Just [Select ["x", "y", "z"]])
+    , ("SELECT where"          , Nothing)
+    , ("selec where"           , Nothing)
+    , ("select `x`"            , Just [Select ["x"]])
+    , ("SELECT x LIMIT 23"     , Just [Select ["x"], Limit 23])
+    , ( "SELECT x, y, `z`, `LIMIT` LIMIT 5"
+      , Just [Select ["x", "y", "z", "LIMIT"], Limit 5]
+      )
+    , ("SELECT x, y, `z`, LIMIT 5", Nothing)
+    , ("SELECT x, y LIMIT -5"     , Nothing)
+    , ( "select x where `b` == \"b\""
+      , Just [Select ["x"], Where (Operation (Col "b") nop (Const (CStr "b")))]
+      )
+    , ( "select x where `a` + 4.5 <= 56.4 / `b`"
+      , Just
+          [ Select ["x"]
+          , Where
+              (Operation (Operation (Col "a") nop (Const (CDouble 4.5)))
+                         nop
+                         (Operation (Const (CDouble 56.4)) nop (Col "b"))
+              )
+          ]
+      )
+    , ("select x where `a` + 4.5 <= 56.4 /", Nothing)
+    , ("select x where `a` + <="           , Nothing)
+    , ("select x where `a` <="             , Nothing)
+    , ( "select x where `a` + 4.5 <= 56.4 / `b` limit 5"
+      , Just
+          [ Select ["x"]
+          , Where
+              (Operation (Operation (Col "a") nop (Const (CDouble 4.5)))
+                         nop
+                         (Operation (Const (CDouble 56.4)) nop (Col "b"))
+              )
+          , Limit 5
+          ]
+      )
+    , ("select x orderby asc y", Just [Select ["x"], OrderBy (Asc, ["y"])])
+    , ("select x orderby asc"      , Nothing)
+    , ("select x orderby asc where", Nothing)
+    , ( "select x orderby asc y, z, `alpha`"
+      , Just [Select ["x"], OrderBy (Asc, ["y", "z", "alpha"])]
+      )
+    , ("select x orderby asc y, where, `alpha`", Nothing)
+    , ( "select x where True orderby asc y, z, `alpha`"
+      , Just
+          [ Select ["x"]
+          , Where (Const (CBool True))
+          , OrderBy (Asc, ["y", "z", "alpha"])
+          ]
+      )
+    , ("select x orderby asc y, z, `alpha` where True ", Nothing)
     ]
 
 testParseQuery = testOn
-    (\(number, (input, expected)) -> assertEq (parseQuery input) expected
-        ("Test number (1-indexed): parseSelect - no schema/table - " ++ show number ++ " with input\n" ++ input)
+    (\(number, (input, expected)) -> assertEq
+        (parseQuery input)
+        expected
+        (  "Test number (1-indexed): parseSelect - no schema/table - "
+        ++ show number
+        ++ " with input\n"
+        ++ input
+        )
     )
     parseQueryTests
 
 
 testOn :: ((Int, a) -> b) -> [a] -> [b]
-testOn fn = zipWith (curry fn) [1..]
+testOn fn = zipWith (curry fn) [1 ..]
 
 runTests :: [IO ()] -> IO ()
 runTests = foldl (>>) (putStr "")

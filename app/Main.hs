@@ -1,5 +1,6 @@
 module Main where
 import           Control.Monad                  ( forever )
+import           Data.Char
 import           Data.List
 import           Data.List.Split
 import           Operations                     ( execute
@@ -31,6 +32,13 @@ printResult' (Left e) = do
 printResult' (Right t) = do
     prettyPrintTable t
 
+loopUntilMonad fn monadfirst getMonad =
+    monadfirst
+        >>= (\result -> if fn result
+                then return "end of loop"
+                else getMonad result >> loopUntilMonad fn monadfirst getMonad
+            )
+
 main :: IO ()
 main = do
     args <- getArgs
@@ -40,51 +48,10 @@ main = do
     putStrLn ""
     prettyPrintTable table
 
-    forever
-        (   getLine
-        >>= (\ln -> putStrLn "RESULT" >> printResult table (parseQuery ln))
-        )
-    -- putStrLn
-    --     (  "expr: "
-    --     ++ (show
-    --            (evalExpr [("alpha", CStr ""), ("beta", CInt 0)]
-    --                      [CStr "value", CInt 45]
-    --                      (Col "beta")
-    --            )
-    --        )
-    --     )
-    -- putStrLn
-    --     (  "expr: "
-    --     ++ (show
-    --            (evalExpr [("alpha", CStr ""), ("beta", CInt 0)]
-    --                      [CStr "value", CInt 45]
-    --                      (Const (CInt 45))
-    --            )
-    --        )
-    --     )
-    -- -- putStrLn ("expr: " ++ (show (evalExpr [("alpha", CStr ""), ("beta", CInt 0)] [CStr "value", CBool False] (Col "beta"))))
-    -- putStrLn
-    --     (  "expr: "
-    --     ++ (show
-    --            (evalExpr
-    --                [ ("alpha", CStr "")
-    --                , ("beta" , CInt 0)
-    --                , ("gamma", CDouble 0)
-    --                ]
-    --                [CStr "value", CInt 45, CDouble 3.14]
-    --                (Operation (Col "beta") add (Const (CBool False)))
-    --            )
-    --        )
-    --     )
-    -- putStrLn
-    --     (  "expr: "
-    --     ++ (show
-    --            (evalExpr [("alpha", CStr ""), ("beta", CInt 0)]
-    --                      [CStr "value", CInt 45]
-    --                      (Col "beta")
-    --            )
-    --        )
-    --     )
+    loopUntilMonad
+        (\x -> map toLower x == "quit")
+        getLine
+        (\ln -> putStrLn "RESULT" >> printResult table (parseQuery ln))
     hClose handle
 
 parseArgs args | argCount < 3 = error "Invalid Argument Count"

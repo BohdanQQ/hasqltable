@@ -223,7 +223,7 @@ termExpr =
         `orElse` boolExpr
         `orElse` (double >>= (parserPure . Const . CDouble . read))
         `orElse` (integer >>= (parserPure . Const . CInt . read))
-        `orElse` (stringLiteral >>= (parserPure . Const . CStr)) 
+        `orElse` (stringLiteral >>= (parserPure . Const . CStr))
 
 -- parses (leftTerminalExpr op rightTerminalExpr)-type expression 
 opExpr :: Parser Expr
@@ -364,8 +364,8 @@ execute
 execute query table = foldl exec table reorderedQuery
   where
     reorderedQuery = reorderQuery query
-    exec (Right  table) qry = executeQuery table qry
-    exec (Left error) _   = Left error
+    exec (Right table) qry = executeQuery table qry
+    exec (Left  error) _   = Left error
     reorderQuery q = sortWith (\a b -> idQ a < idQ b) q
     idQ (Select  _) = 10 -- select as last
     idQ (Limit   _) = 9
@@ -414,7 +414,7 @@ executeQuery (schema, rowgroups) (Limit rowCount) =
 executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
     case sortedRows of
         (Right res) -> Right (schema, [res])
-        (Left err) -> Left err
+        (Left  err) -> Left err
 
   where
     comparer = case order of
@@ -424,15 +424,15 @@ executeQuery (schema, rowgroups) (OrderBy (order, columns)) =
     rows       = concat rowgroups
     sortedRows = foldl folder (Right rows) columns
     folder (Right cells) column = orderByOne schemaCols column cells comparer
-    folder (Left msg  ) column = Left msg
+    folder (Left  msg  ) column = Left msg
 
 ------
 --- WHERE
 ------
 executeQuery (schema, rowgroups) (Where expr) = case result of
-  Left s -> Left s
-  Right filteredRows -> Right (schema, [filteredRows])
-    
+    Left  s            -> Left s
+    Right filteredRows -> Right (schema, [filteredRows])
+
   where
     rows       = concat rowgroups
     resultRows = map
@@ -440,13 +440,16 @@ executeQuery (schema, rowgroups) (Where expr) = case result of
             (evalExpr schema r (Operation expr boolAnd (Const (CBool True))), r)
         )
         rows
-    tmp = foldl (\acc (e, _) -> acc >> e) (Right (CBool True) :: Either String Cell) resultRows
+    tmp = foldl (\acc (e, _) -> acc >> e)
+                (Right (CBool True) :: Either String Cell)
+                resultRows
     result = case tmp of
-      Left err -> Left err
-      Right _ ->  Right (map snd (filter (okResult . fromRightUnsafe . fst) resultRows))
+        Left  err -> Left err
+        Right _   -> Right
+            (map snd (filter (okResult . fromRightUnsafe . fst) resultRows))
     fromRightUnsafe x = case x of
         Right e -> e
-        Left _ -> error "Impossible error"
+        Left  _ -> error "Impossible error"
     okResult res = case res of
         (CBool x) -> x
         _         -> False
@@ -491,10 +494,15 @@ orderByOne schema column rows comparer = if isNothing mbColIdx
     then Left $ "Could not find column " ++ column
     else Right sortedRows
   where
-    sortedRows =
-        Data.List.sortBy (\r1 r2 -> case comparer (r1 !! colIdx) (r2 !! colIdx) of
-      Left s -> error ("Table parsed into invalid format! Attempted to compare incompatible types: " ++ s)
-      Right ord -> ord ) rows
+    sortedRows = Data.List.sortBy
+        (\r1 r2 -> case comparer (r1 !! colIdx) (r2 !! colIdx) of
+            Left s -> error
+                ("Table parsed into invalid format! Attempted to compare incompatible types: "
+                ++ s
+                )
+            Right ord -> ord
+        )
+        rows
     mbColIdx = elemIndex column schema
     colIdx   = fromJust mbColIdx
 

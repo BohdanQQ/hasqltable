@@ -1,16 +1,16 @@
 
-module Parser (
-    Parser(..),
-    satisfy,
-    failure,
-    orElse,
-    string,
-    lowerUpperString,
-    many,
-    some,
-    whitespace,
-    parserPure
-) where
+module Parser
+    ( Parser(..)
+    , satisfy
+    , failure
+    , orElse
+    , string
+    , lowerUpperString
+    , many
+    , some
+    , whitespace
+    , parserPure
+    ) where
 
 import qualified Control.Monad                 as M
 import           Data.Char
@@ -60,13 +60,14 @@ string str@(c : s) = satisfy (== c) >> string s >> pure str
 string []          = parserPure []
 
 lowerUpperString :: [Char] -> Parser [Char]
-lowerUpperString str@(c:s) = satisfy (\a -> toLower a == toLower c) >>  lowerUpperString s >> pure str
+lowerUpperString str@(c : s) =
+    satisfy (\a -> toLower a == toLower c) >> lowerUpperString s >> pure str
 lowerUpperString [] = parserPure []
 
 many :: Parser a -> Parser [a]
 many p = many' p []
-many' p soFarAcc =
-    (p >>= (\match -> many' p (soFarAcc ++ [match]))) `orElse` parserPure soFarAcc
+many' p soFarAcc = (p >>= (\match -> many' p (soFarAcc ++ [match])))
+    `orElse` parserPure soFarAcc
 
 some :: Parser a -> Parser [a]
 some p = many p >>= (\match -> if null match then failure else pure match)

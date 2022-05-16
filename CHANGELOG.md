@@ -4,3 +4,12 @@
 
 * First version. Released on an unsuspecting world.
 * Basic structure, first steps with Cabal
+
+## 0.5.0.0 -- 2022-05-13
+
+* query loop which supports ```SELECT, simple WHERE, GROUPBY, ORDERBY, LIMIT``` clauses
+
+## 0.6.0.0 -- 2022-05-16
+
+* query loop may be exited properly now
+* noncirtical errors now don't crash the program
