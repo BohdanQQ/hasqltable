@@ -1,15 +1,15 @@
 # hasqltable
-(WIP) Simple Querying over Tables in Haskell
+Simple Querying over (CSV) Tables in Haskell
 
 ## Usage
 
-`cabal run hasqltable path_to_table schema delimter`
+`cabal run hasqltable path_to_table schema [-d|--delimiter delimiter]`
 
 * `path_to_table` - a path to a (so far only) CSV file
-* `schema` is a string made of the characters `s`, `d`, `i` or `b` indicating the type (string, double, int, bool)
-* `delimiter` is a string determining the delimiter of the CSV file
+* `schema` - a string made of the characters `s`, `d`, `i` or `b` indicating the type of columns (string, double, int, bool) in the same order
+* `delimiter` - a string determining the delimiter of the CSV file, `,` by default
 
-The program runs in a loop of `prompt -> command -> result`. To quit, type `quit` as the command.
+The program runs in a REPL. To quit, type `quit` as the command.
 
 ## Tests
 

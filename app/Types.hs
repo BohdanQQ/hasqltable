@@ -138,19 +138,12 @@ unwrapOrErr :: [Char] -> Maybe p -> p
 unwrapOrErr message Nothing  = error message
 unwrapOrErr message (Just a) = a
 
-parseCell :: Cell -> String -> Maybe Cell
-parseCell (CStr    _) s = Just (CStr s)
-parseCell (CInt    _) s = let i = readMaybe s in unwrapWith CInt i
-parseCell (CDouble _) s = let i = readMaybe s in unwrapWith CDouble i
-parseCell (CBool   _) s = let i = readMaybe s in unwrapWith CBool i
-
+data Order = Asc | Desc
 typeOfCell :: Cell -> [Char]
 typeOfCell (CStr    _) = "String"
 typeOfCell (CInt    _) = "Int"
 typeOfCell (CDouble _) = "Double"
 typeOfCell (CBool   _) = "Bool"
-
-data Order = Asc | Desc
 
 data SubQuery
   = Select [String]
@@ -247,7 +240,7 @@ ensureAndContinue desc judge finalFn argl argr
     | otherwise = Left
         (  "Incompatible types for operation `"
         ++ desc
-        ++ "` detected ("
+        ++ "`(for types: "
         ++ showCellsWith typeOfCell [argl, argr]
         ++ ")"
         )

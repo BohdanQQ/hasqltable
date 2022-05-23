@@ -13,3 +13,7 @@
 
 * query loop may be exited properly now
 * noncirtical errors now don't crash the program
+
+## 0.9.0.0 -- 2022-05-23
+
+* finishing touches, refactoring

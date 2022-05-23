@@ -5,6 +5,7 @@ import           Data.Text                      ( isInfixOf
                                                 , toLower
                                                 )
 import           Operations
+import           Parsing
 import           System.Exit                    ( exitFailure )
 import           Types
 
