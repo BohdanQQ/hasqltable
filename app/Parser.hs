@@ -72,14 +72,14 @@ many' p soFarAcc = (p >>= (\match -> many' p (soFarAcc ++ [match])))
 some :: Parser a -> Parser [a]
 some p = many p >>= (\match -> if null match then failure else pure match)
 
+-- | includes whitespace characters, multiline and single-line comments
 whitespace :: Parser ()
-whitespace =
-    spaces
-        >>       (  (singleLineComment `orElse` multiLineComment)
-                 >> spaces
-                 >> parserPure ()
-                 )
-        `orElse` (spaces >> parserPure ())
+whitespace = many
+            (        (satisfy isSpace >> parserPure ())
+            `orElse` singleLineComment
+            `orElse` multiLineComment
+            )
+        >> parserPure ()
 
 spaces :: Parser [Char]
 spaces = many $ satisfy isSpace
