@@ -1,12 +1,8 @@
 module Types where
 import           Data.List                      ( elemIndex
-                                                , find
                                                 , intercalate
-                                                , intersperse
-                                                , nub
                                                 )
 import           Data.Maybe                     ( isJust )
-import           Text.Read                      ( readMaybe )
 
 -- | The cetnral type of the program, holds a string/integer/double/bool value
 -- and represents a single cell in the DB table 
@@ -87,6 +83,7 @@ type Table = (Schema, [RowGroup])
 -- | customizable "string::format" for a cell list
 --
 -- * returns: comma-separated list of showFn resutls  
+showCellsWith :: (a -> [Char]) -> [a] -> [Char]
 showCellsWith showFn cells = intercalate "," (map showFn cells)
 
 -- the following instances should always be used with the Comp class to avoid runtime errors
@@ -188,7 +185,7 @@ data Expr
     -- | constant (literals should be parsed into this variant)
     | Const Cell
     -- | an operation node (left side, operation, right side)
-    | Operation {left :: Expr, op :: Cell -> Cell -> Either String Cell, right :: Expr}
+    | Operation {left :: Expr, operation :: Cell -> Cell -> Either String Cell, right :: Expr}
 
 
 -- | ensures that arguments (judged by a judge) are valid
@@ -216,38 +213,68 @@ ensureAndExecuteOp desc judge finalFn argl argr
 -- now follows the list of operation functions used to build an expression:
 
 -- TODO: unary operator support (not, unary -)
+boolCheck :: Cell -> Cell -> Bool
 boolCheck (CBool _) (CBool _) = True
 boolCheck _         _         = False
 
+
+add :: Cell -> Cell -> Either String Cell
 add = ensureAndExecuteOp "+" compatibleArith (+)
+
+mul :: Cell -> Cell -> Either String Cell
 mul = ensureAndExecuteOp "*" compatibleArith (*)
+
+sub :: Cell -> Cell -> Either String Cell
 sub = ensureAndExecuteOp "-" compatibleArith (-)
+
+div :: Cell -> Cell -> Either String Cell
 div = ensureAndExecuteOp "/" compatibleArith (/)
+
+boolAnd :: Cell -> Cell -> Either String Cell
 boolAnd =
     ensureAndExecuteOp "&" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
+
+boolOr :: Cell -> Cell -> Either String Cell
 boolOr =
     ensureAndExecuteOp "|" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
+
+boolXor :: Cell -> Cell -> Either String Cell
 boolXor = ensureAndExecuteOp
     "^"
     boolCheck
     (\(CBool a) (CBool b) -> CBool ((a || b) && (not a || not b)))
+cellCompareAsc :: Cell -> Cell -> Either String Ordering
 cellCompareAsc = ensureAndExecuteOp "comparison asc" compatibleOrd compare
+
+cellCompareDesc :: Cell -> Cell -> Either String Ordering
 cellCompareDesc =
     ensureAndExecuteOp "comparison desc" compatibleOrd (flip compare)
 
+compatibleOrdEq :: Compat a => a -> a -> Bool
 compatibleOrdEq x y = compatibleEq x y && compatibleEq x y
 
+cellLeq :: Cell -> Cell -> Either String Cell
 cellLeq = ensureAndExecuteOp "<=" compatibleOrdEq (\a b -> CBool (a <= b))
+
+cellLe :: Cell -> Cell -> Either String Cell
 cellLe = ensureAndExecuteOp "<" compatibleOrd (\a b -> CBool (a < b))
+
+cellGeq :: Cell -> Cell -> Either String Cell
 cellGeq = ensureAndExecuteOp ">=" compatibleOrdEq (\a b -> CBool (a >= b))
+
+cellGe :: Cell -> Cell -> Either String Cell
 cellGe = ensureAndExecuteOp ">" compatibleOrd (\a b -> CBool (a > b))
+
+cellEq :: Cell -> Cell -> Either String Cell
 cellEq = ensureAndExecuteOp "== (equal)" compatibleEq (\a b -> CBool (a == b))
+
+cellNeq :: Cell -> Cell -> Either String Cell
 cellNeq =
     ensureAndExecuteOp "!= (not equal)" compatibleEq (\a b -> CBool (a /= b))
 
 -- | evaluates an expression in the context of a row (adhering to a schema)
 evalExpr :: Schema -> Row -> Expr -> Either String Cell
-evalExpr schema row (Const cell) = Right cell
+evalExpr _ _ (Const cell) = Right cell
 evalExpr schema row (Col colName)
     | found && areSameType = Right item
     | not found = Left ("Column " ++ colName ++ " not found in schema")
@@ -261,8 +288,8 @@ evalExpr schema row (Col colName)
     unwrapMaybe _      (Just val) = val
     unwrapMaybe errMsg _          = error errMsg
 
-    getIdxOrErr errMsg row index | length row <= index = error errMsg
-                                 | otherwise           = row !! index
+    getIdxOrErr errMsg r i | length r <= i = error errMsg
+                           | otherwise     = r !! i
 
     foundItem = lookup colName schema
     found     = isJust foundItem

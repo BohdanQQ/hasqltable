@@ -1,4 +1,8 @@
 
+-- Credit: Vít Šefl
+    -- https://github.com/vituscze
+    -- https://github.com/vituscze/neproc/blob/master/Homework/hw6.hs
+
 module Parser
     ( Parser(..)
     , satisfy
@@ -19,30 +23,31 @@ import           Data.Maybe
 newtype Parser a = Parser { runParser :: String -> Maybe (a, String) }
 
 satisfy :: (Char -> Bool) -> Parser Char
-satisfy pred = Parser p
+satisfy predicate = Parser p
   where
     p ""         = Nothing
-    p (c : rest) = if pred c then Just (c, rest) else Nothing
+    p (c : rest) = if predicate c then Just (c, rest) else Nothing
 
 failure :: Parser a
 failure = Parser (const Nothing)
 
 orElse :: Parser a -> Parser a -> Parser a
-orElse l r = Parser (orElse' (runParser l) (runParser r))
-orElse' l r s = res
+orElse ifP elseP = Parser (orElse' (runParser ifP) (runParser elseP))
   where
-    lr  = l s
-    res = if isJust lr then lr else r s
+    orElse' runPl runPr s = res
+      where
+        lr  = runPl s
+        res = if isJust lr then lr else runPr s
 
 parserPure :: a -> Parser a
 parserPure x = Parser (\s -> Just (x, s))
 
 
 parserBind :: Parser a -> (a -> Parser b) -> Parser b
-parserBind m f = Parser (parserBind' m f)
-
-parserBind' m f s =
-    runParser m s >>= (\(match, rest) -> runParser (f match) rest)
+parserBind p newPFn = Parser (parserBind' p newPFn)
+  where
+    parserBind' m f s =
+        runParser m s >>= (\(match, rest) -> runParser (f match) rest)
 
 instance Functor Parser where
     fmap = M.liftM
@@ -65,16 +70,18 @@ lowerUpperString str@(c : s) =
 lowerUpperString [] = parserPure []
 
 many :: Parser a -> Parser [a]
-many p = many' p []
-many' p soFarAcc = (p >>= (\match -> many' p (soFarAcc ++ [match])))
-    `orElse` parserPure soFarAcc
+many psr = many' psr []
+  where
+    many' p soFarAcc = (p >>= (\match -> many' p (soFarAcc ++ [match])))
+        `orElse` parserPure soFarAcc
 
 some :: Parser a -> Parser [a]
 some p = many p >>= (\match -> if null match then failure else pure match)
 
 -- | includes whitespace characters, multiline and single-line comments
 whitespace :: Parser ()
-whitespace = many
+whitespace =
+    many
             (        (satisfy isSpace >> parserPure ())
             `orElse` singleLineComment
             `orElse` multiLineComment

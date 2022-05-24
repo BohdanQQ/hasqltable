@@ -3,7 +3,6 @@ module Config
     , parseConfig
     ) where
 
-import           Data.Complex
 import           Options.Applicative
 
 data Config = Config

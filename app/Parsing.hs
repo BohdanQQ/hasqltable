@@ -7,7 +7,6 @@ import           Data.Char                      ( isSpace
                                                 , toLower
                                                 )
 import           Data.List                      ( nub )
-import           Data.List.NonEmpty             ( sortWith )
 import           Data.List.Split                ( splitOn )
 import           GHC.IO.Handle                  ( Handle
                                                 , hGetContents
@@ -68,7 +67,7 @@ parseWithSchema = zipWith parser
   where
     unwrapOrErr :: [Char] -> Maybe p -> p
     unwrapOrErr message Nothing  = error message
-    unwrapOrErr message (Just a) = a
+    unwrapOrErr _       (Just a) = a
     parser cellTemplate cellValue = unwrapOrErr
         (  "Invalid value "
         ++ cellValue
@@ -93,7 +92,7 @@ parseCell (CBool   _) s = let i = readMaybe s in i >>= Just . CBool
 --
 -- Just variants are unwrapped into the list and Nothing variants are ignored
 parseSequenceWithAccumulation :: [Parser (Maybe a)] -> Parser [a]
-parseSequenceWithAccumulation parsers@(p : ps) =
+parseSequenceWithAccumulation (p : ps) =
     p
         >>= (\result ->
                 whitespace
@@ -115,7 +114,7 @@ parseQuery q = case res of
     (Just (result, rest)) -> if null rest then Just result else Nothing
     Nothing               -> Nothing
   where
-    res = runParser (p >>= (\res -> whitespace >> parserPure res)) q
+    res = runParser (p >>= (\r -> whitespace >> parserPure r)) q
     p   = parseSequenceWithAccumulation
     -- accumulates each (parsed) query 
         (wrapWithJust parseSelect : safeSubqueries)
@@ -129,7 +128,8 @@ parseQuery q = case res of
     safeSubqueries = map safeSubquerryMapper notMandCombSubqueries
     -- this parser always succeeds, but propagates errors in the form of Nothing
     -- which is then ignored by the collector (parseSequenceWithAccumulation)
-    safeSubquerryMapper p = wrapWithJust p `orElse` parserPure Nothing
+    safeSubquerryMapper parser =
+        wrapWithJust parser `orElse` parserPure Nothing
 
 --------------------------------------------------------------------------------
 --- subquery parsers
@@ -214,12 +214,6 @@ termExpr =
         `orElse` (double >>= (parserPure . Const . CDouble . read))
         `orElse` (integer >>= (parserPure . Const . CInt . read))
         `orElse` (stringLiteral >>= (parserPure . Const . CStr))
-  where
-    boolExpr =
-        (Parser.lowerUpperString "true" >> parserPure (Const (CBool True)))
-            `orElse` (  Parser.lowerUpperString "false"
-                     >> parserPure (Const (CBool False))
-                     )
 
 -- | parses (leftTerminalExpr op rightTerminalExpr)-type expression 
 opExpr :: Parser Expr
@@ -228,10 +222,10 @@ opExpr =
         >>= (\lexpr ->
                 whitespace
                     >>  arithOperation
-                    >>= (\op ->
+                    >>= (\o ->
                             whitespace
                                 >>  termExpr
-                                >>= (parserPure . Operation lexpr op)
+                                >>= (parserPure . Operation lexpr o)
                         )
             )
 
@@ -248,10 +242,10 @@ simpleExpr =
         >>= (\lexpr ->
                 whitespace
                     >>  whereOperation
-                    >>= (\op ->
+                    >>= (\o ->
                             whitespace
                                 >>  sideExpr
-                                >>= (parserPure . Operation lexpr op)
+                                >>= (parserPure . Operation lexpr o)
                         )
             )
         )

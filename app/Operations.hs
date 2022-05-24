@@ -2,23 +2,14 @@ module Operations
     ( prettyPrintTable
     , execute
     ) where
-import           Data.Char                      ( isSpace
-                                                , toLower
-                                                )
 import           Data.List                      ( elemIndex
                                                 , groupBy
                                                 , intercalate
-                                                , intersperse
-                                                , nub
                                                 , sortBy
                                                 , transpose
                                                 )
-import           Data.List.Split                ( splitOn )
-import           Data.Maybe
-import qualified GHC.Unicode                   as Char
-import           Parser
-import           System.IO                      ( Handle
-                                                , hGetContents
+import           Data.Maybe                     ( fromJust
+                                                , isNothing
                                                 )
 import           Types
 
@@ -27,6 +18,7 @@ import           Types
 ------------
 
 -- | returns string representation of a cell's value
+strCellValue :: Cell -> String
 strCellValue (CInt    i) = show i
 strCellValue (CDouble i) = show i
 strCellValue (CStr    i) = i
@@ -44,10 +36,10 @@ prettyPrintTable (schema, rowgroups) = do
     colSizes = zipWith max maxLenPerCol schemaColLengths
 -- | applies padding to the end of a string to match certain length
 padTo :: Int -> Char -> String -> String -> String
-padTo padding padChar string extraStr =
+padTo padding padChar strToPad extraStr =
     extraStr
-        ++ string
-        ++ replicate (padding - length string) padChar
+        ++ strToPad
+        ++ replicate (padding - length strToPad) padChar
         ++ extraStr
 
 
@@ -71,24 +63,22 @@ prettyPrintRow row padding = putStrLn $ intercalate
     "|"
     (zipWith (\cell pad -> padTo pad ' ' (strCellValue cell) " ") row padding)
 
-type QueryResult = Either Table String
+type QueryResult = Either String Table
 
 ------
 --- MAIN QUERY EXECUTOR
 ------
 -- | executes a query on a table
-execute
-    :: [SubQuery]
-    -> Either String ([(String, Cell)], [[[Cell]]])
-    -> Either String ([(String, Cell)], [[[Cell]]])
+execute :: [SubQuery] -> QueryResult -> QueryResult
 execute query wrappedTable = foldl exec wrappedTable reorderedQuery
   where
     -- reordering (for execution) is needed, see below
     reorderedQuery = reorderQuery query
     -- exec - execute subquery or propagate error
     exec (Right table) qry = executeSubquery table qry
-    exec (Left  error) _   = Left error
+    exec (Left  err  ) _   = Left err
     reorderQuery q = sortBy (\a b -> compare (idQ a) (idQ b)) q
+    idQ :: SubQuery -> Int
     idQ (Select  _) = 10 -- select as last
     idQ (Limit   _) = 9
     idQ (OrderBy _) = 8 -- orderby before select (to ensure we can order by any column)
@@ -100,10 +90,7 @@ execute query wrappedTable = foldl exec wrappedTable reorderedQuery
 --- SELECT
 ------
 -- | executes a single subquery on the table
-executeSubquery
-    :: ([(String, Cell)], [[[Cell]]])
-    -> SubQuery
-    -> Either String ([(String, Cell)], [[[Cell]]])
+executeSubquery :: Table -> SubQuery -> QueryResult
 executeSubquery (schema, rowgroups) (Select cols) = if err0 == ""
     then Right (newSchema, extractedRows)
     else Left err0
@@ -145,7 +132,7 @@ executeSubquery (schema, rowgroups) (OrderBy (order, columns)) =
     rows       = concat rowgroups
     sortedRows = foldl folder (Right rows) columns
     folder (Right cells) column = orderByOne schemaCols column cells comparer
-    folder (Left  msg  ) column = Left msg
+    folder (Left  msg  ) _      = Left msg
 
 ------
 --- WHERE
@@ -183,12 +170,12 @@ executeSubquery (schema, rowgroups) (Where expr) = case result of
 --- GROUP_BY
 ------
 
-executeSubquery t@(schema, rowgroups) (GroupBy columns) = case groupedRows of
+executeSubquery t@(schema, _) (GroupBy columns) = case groupedRows of
     Left  rg  -> Right (schema, [map head rg])
     Right err -> Left err
     where groupedRows = createGroupsBy t columns
 
-
+-- | groups table rows by the specified columns 
 createGroupsBy :: Table -> [String] -> Either [[[Cell]]] [Char]
 createGroupsBy (schema, rowGroups) columns = if null err0
     then Left groupedRows
