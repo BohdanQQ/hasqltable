@@ -49,6 +49,46 @@ assertEq result ex helper = if result == ex
         ++ "\n\n---\n\n"
         ++ helper
 
+-- | an old query checking code implemented before parsing
+
+propagateIfErr :: (Bool, [Char]) -> (Bool, [Char])
+propagateIfErr fnCallResult = if not groupRes then (False, msg) else (True, "")
+    where (groupRes, msg) = fnCallResult
+
+queryCheckLimit :: Query -> (Bool, String)
+queryCheckLimit [] = (True, "")
+queryCheckLimit [Limit i]
+    | i < 0 = (False, "LIMIT must have a nonnegative integer as its parameter")
+    | otherwise = (True, "")
+queryCheckLimit (Limit _ : rest) =
+    (False, "LIMIT (if present) must be the last subquery within a query")
+queryCheckLimit _ =
+    (False, "Invalid syntax - unexpected part of / end of query")
+
+queryCheckOrderBy :: Query -> (Bool, String)
+queryCheckOrderBy [] = (True, "")
+queryCheckOrderBy ((OrderBy (_, cols)) : rest)
+    | null cols = (False, "Empty OrderBy")
+    | otherwise = queryCheckLimit rest
+queryCheckOrderBy list = propagateIfErr $ queryCheckLimit list
+
+queryCheckGroupBy :: Query -> (Bool, String)
+queryCheckGroupBy [] = (True, "")
+queryCheckGroupBy ((GroupBy cols) : rest) | null cols = (False, "Empty GroupBy")
+                                          | otherwise = queryCheckOrderBy rest
+queryCheckGroupBy list = propagateIfErr $ queryCheckOrderBy list
+
+queryCheckWhere :: Query -> (Bool, String)
+queryCheckWhere []                 = (True, "")
+queryCheckWhere ((Where _) : list) = propagateIfErr $ queryCheckGroupBy list
+queryCheckWhere list               = propagateIfErr $ queryCheckGroupBy list
+
+queryCheck :: Query -> (Bool, String)
+queryCheck [] = (False, "Empty query")
+queryCheck ((Select cols) : rest) | null cols = (False, "Empty select")
+                                  | otherwise = queryCheckWhere rest
+queryCheck _ = (False, "Query must begin with a Select subquery")
+
 queryChecktests =
     [ ( -- empty select
        queryCheck [Select []]                          , (False, "empty"))
@@ -236,6 +276,34 @@ parseQueryTests =
       )
     , ("select x orderby asc y, z, `alpha` where True ", Nothing)
     ]
+
+instance Eq SubQuery where
+    Select  x         == Select  y         = x == y
+    GroupBy x         == GroupBy y         = x == y
+    OrderBy (Asc , x) == OrderBy (Asc , y) = x == y
+    OrderBy (Desc, x) == OrderBy (Desc, y) = x == y
+    Where   x         == Where   y         = x == y
+    Limit   x         == Limit   y         = x == y
+    _                 == _                 = False
+
+instance Show SubQuery where
+    show (Select  x        ) = "Select(" ++ show x ++ ")"
+    show (GroupBy x        ) = "GroupBy(" ++ show x ++ ")"
+    show (Limit   x        ) = "Limit(" ++ show x ++ ")"
+    show (OrderBy (Asc , x)) = "OrderBy( ASC, " ++ show x ++ ")"
+    show (OrderBy (Desc, x)) = "OrderBy( ASC, " ++ show x ++ ")"
+    show (Where   e        ) = "Where(" ++ show e ++ ")"
+
+instance Show Expr where
+    show (Col   c        ) = "ColExpr(" ++ show c ++ ")"
+    show (Const c        ) = "ConsExpr(" ++ show c ++ ")"
+    show (Operation l _ r) = "(" ++ show l ++ "?" ++ show r ++ ")"
+
+instance Eq Expr where
+    (Col   c        ) == (Col   d          ) = c == d
+    (Const c        ) == (Const d          ) = c == d
+    (Operation l _ r) == (Operation l1 _ r1) = l == l1 && r == r1
+    _                 == _                   = False
 
 testParseQuery = testOn
     (\(number, (input, expected)) -> assertEq

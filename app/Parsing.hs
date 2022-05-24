@@ -66,6 +66,9 @@ createDefualtSchema names repr = if valid
 parseWithSchema :: [Cell] -> [[Char]] -> [Cell]
 parseWithSchema = zipWith parser
   where
+    unwrapOrErr :: [Char] -> Maybe p -> p
+    unwrapOrErr message Nothing  = error message
+    unwrapOrErr message (Just a) = a
     parser cellTemplate cellValue = unwrapOrErr
         (  "Invalid value "
         ++ cellValue
@@ -77,9 +80,9 @@ parseWithSchema = zipWith parser
 
 parseCell :: Cell -> String -> Maybe Cell
 parseCell (CStr    _) s = Just (CStr s)
-parseCell (CInt    _) s = let i = readMaybe s in unwrapWith CInt i
-parseCell (CDouble _) s = let i = readMaybe s in unwrapWith CDouble i
-parseCell (CBool   _) s = let i = readMaybe s in unwrapWith CBool i
+parseCell (CInt    _) s = let i = readMaybe s in i >>= Just . CInt
+parseCell (CDouble _) s = let i = readMaybe s in i >>= Just . CDouble
+parseCell (CBool   _) s = let i = readMaybe s in i >>= Just . CBool
 
 -------
 --- QUERY PARSING
