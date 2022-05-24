@@ -12,25 +12,9 @@ import           Operations                     ( execute
 import           Options.Applicative
 import           Parsing
 import           System.Environment
+import           System.Exit                    ( exitFailure )
 import           System.IO
-import           Types                          ( Cell(..)
-                                                , Expr(..)
-                                                , Order(..)
-                                                , add
-                                                , div
-                                                , evalExpr
-                                                , mul
-                                                , sub
-                                                , unwrapOrErr
-                                                )
-
-printResult t (Just subqs) = do
-    printResult' (execute subqs (Right t))
-printResult _ Nothing = putStrLn "cannot parse query"
-printResult' (Left e) = do
-    putStrLn e
-printResult' (Right t) = do
-    prettyPrintTable t
+import           Types
 
 -- if fn is true, exits
 -- monadfirst is the monad which gets a value
@@ -51,16 +35,27 @@ main = do
     c@Config {..} <- execParser opts
     args          <- getArgs
     handle        <- openFile file ReadMode
-    table         <- parseCsv delimiter schema handle
-    putStrLn ""
-    prettyPrintTable table
-    hClose handle
+    if not $ isSchemaStrValid schema
+        then do
+            putStrLn "Invalid schema specification, use the --help switch"
+            exitFailure
+        else do
+            table <- parseCsv delimiter schema handle
+            putStrLn ""
+            prettyPrintTable table
+            hClose handle
 
-    loopUnlessMonad
-        (\x -> map toLower x == "quit")
-        getLine
-        (\ln -> putStrLn "" >> printResult table (parseQuery ln))
+            loopUnlessMonad
+                (\x -> map toLower x == "quit")
+                getLine
+                (\ln -> putStrLn "" >> printResult table (parseQuery ln))
+  where
+    isSchemaStrValid :: String -> Bool
+    isSchemaStrValid = all (`elem` ['s', 'i', 'd', 'b'])
 
-parseArgs args | argCount < 3 = error "Invalid Argument Count"
-               | otherwise    = (head args, args !! 1, args !! 2)
-    where argCount = length args
+    printResult t (Just subqs) = printResult' (execute subqs (Right t))
+    printResult _ Nothing      = putStrLn "cannot parse query"
+
+    printResult' (Left  e) = putStrLn e
+    printResult' (Right t) = prettyPrintTable t
+
