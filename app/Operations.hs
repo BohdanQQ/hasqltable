@@ -130,9 +130,7 @@ executeSubquery (schema, rowgroups) (OrderBy (order, columns)) =
         Desc -> cellCompareDesc
     schemaCols = map fst schema
     rows       = concat rowgroups
-    sortedRows = foldl folder (Right rows) columns
-    folder (Right cells) column = orderByOne schemaCols column cells comparer
-    folder (Left  msg  ) _      = Left msg
+    sortedRows = sortRows rows columns schemaCols comparer
 
 ------
 --- WHERE
@@ -171,18 +169,19 @@ executeSubquery (schema, rowgroups) (Where expr) = case result of
 ------
 
 executeSubquery t@(schema, _) (GroupBy columns) = case groupedRows of
-    Left  rg  -> Right (schema, [map head rg])
-    Right err -> Left err
+    Right  rg  -> Right (schema, [map head rg])
+    Left err -> Left err
     where groupedRows = createGroupsBy t columns
 
 -- | groups table rows by the specified columns 
-createGroupsBy :: Table -> [String] -> Either [[[Cell]]] [Char]
+createGroupsBy :: Table -> [String] -> Either String [[[Cell]]]
 createGroupsBy (schema, rowGroups) columns = if null err0
-    then Left groupedRows
-    else Right err0
+    then sortedRows >>= (Right . Data.List.groupBy (sameOnIdcs colIdcs))
+    else Left err0
   where
     -- pereparation, error checking
     schemaCols       = map fst schema
+    sortedRows = sortRows rows columns schemaCols cellCompareDesc
     mbSchemaIndicies = zip columns (map (`elemIndex` schemaCols) columns)
     invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
     err0             = if null invalidCols
@@ -190,10 +189,20 @@ createGroupsBy (schema, rowGroups) columns = if null err0
         else "Invalid columns " ++ intercalate "," invalidCols ++ " requested"
     colIdcs     = map (fromJust . snd) mbSchemaIndicies
     rows        = concat rowGroups
-    -- most of the work is done here
-    groupedRows = Data.List.groupBy (sameOnIdcs colIdcs) rows
     -- compares two rows based on column values (idcs)
     sameOnIdcs idcs ra rb = all (\i -> (ra !! i) == (rb !! i)) idcs
+
+
+sortRows :: Foldable t =>
+    [Row]
+    -> t String
+    -> [String]
+    -> (Cell -> Cell -> Either String Ordering)
+    -> Either String [Row]
+sortRows rows columns schemaCols comparer = foldl folder (Right rows) columns
+    where
+    folder (Right cells) column = orderByOne schemaCols column cells comparer
+    folder (Left  msg  ) _      = Left msg
 
 -- | Orders rows by exactly one column, ordering is stable
 orderByOne
