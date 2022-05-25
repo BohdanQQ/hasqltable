@@ -93,6 +93,12 @@ SELECT name, surname ORDERBY asc surname, name
 
 Limits the output to `n` rows.
 
+An example of a complex query:
+
+```
+select name, surname, department where `age` / `scorePerDay` <= 12 groupby building orderby asc name, surname limit 2
+```
+
 # Solution documentation
 
 * `split, optparse-applicative` - dependencies for string splitting, argument parsing
