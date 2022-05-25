@@ -84,7 +84,7 @@ Orders based on the order specified. Columns closer to the beginning of the colu
 * see [column list description of the SELECT clause](##Querying)
 
 ```
-SELECT name, surname ORDERBY surname, name
+SELECT name, surname ORDERBY asc surname, name
 ```
 
 ### Limit clause
