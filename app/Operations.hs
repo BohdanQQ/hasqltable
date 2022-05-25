@@ -28,11 +28,13 @@ strCellValue (CBool   i) = show i
 prettyPrintTable :: Table -> IO ()
 prettyPrintTable (schema, rowgroups) = do
     prettyPrintSchema schema colSizes
-    mapM_ (`prettyPrintRow` colSizes) (concat rowgroups)
+    mapM_ (`prettyPrintRow` colSizes) rows
   where
     schemaColLengths = map (length . fst) schema
-    maxLenPerCol     = map (maximum . map (length . strCellValue))
-                           (transpose (concat rowgroups))
+    rows = concat rowgroups
+    maxLenPerCol     = if null rows 
+        then map (const 0) [1..length schema]  
+        else map (maximum . map (length . strCellValue)) (transpose rows)
     colSizes = zipWith max maxLenPerCol schemaColLengths
 -- | applies padding to the end of a string to match certain length
 padTo :: Int -> Char -> String -> String -> String
@@ -199,10 +201,10 @@ sortRows :: Foldable t =>
     -> [String]
     -> (Cell -> Cell -> Either String Ordering)
     -> Either String [Row]
-sortRows rows columns schemaCols comparer = foldl folder (Right rows) columns
+sortRows rows columns schemaCols comparer = foldr folder (Right rows) columns
     where
-    folder (Right cells) column = orderByOne schemaCols column cells comparer
-    folder (Left  msg  ) _      = Left msg
+    folder column (Right cells) = orderByOne schemaCols column cells comparer
+    folder  _ (Left  msg  )      = Left msg
 
 -- | Orders rows by exactly one column, ordering is stable
 orderByOne
