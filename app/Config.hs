@@ -16,4 +16,4 @@ parseConfig =
     Config
         <$> strArgument (metavar "FILE")
         <*> strArgument (metavar "SCHEMA" <> help "A string of the b/i/d/s characters representing bool/int/double/string column value in the order as they appear (e.g. \"siddd\" means the first colum is string, second is int, etc.)")  
-        <*> strOption (short 'd' <> long "delimiter" <> value ",")
+        <*> strOption (short 'd' <> long "delimiter" <> value "," <> help "The column delimiter")
