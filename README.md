@@ -123,11 +123,16 @@ b) along with a column name, to specify column's type (as a part of the table sc
 
 This table representation provides sufficient information to perform the transormations required by the clauses. Additionally, runtime "type checks" are performed when evaluating the WHERE clause expression so that errors do not cause a crash.
 
-## Tests
+## Tests & Docs
 
-Simple testing framework is implemented to test some functionality:
+Simple testing framework is implemented to test some functionality.
 
-`cabal test`
+To run tests: 
+* `cabal test`
+
+To generate documentation: 
+* `cabal haddock --haddock-executables`
+
 
 ## Possible TODOs / imperfections
 * enable full tree syntax for the where clause expression

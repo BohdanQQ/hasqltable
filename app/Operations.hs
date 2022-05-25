@@ -31,9 +31,9 @@ prettyPrintTable (schema, rowgroups) = do
     mapM_ (`prettyPrintRow` colSizes) rows
   where
     schemaColLengths = map (length . fst) schema
-    rows = concat rowgroups
-    maxLenPerCol     = if null rows 
-        then map (const 0) [1..length schema]  
+    rows             = concat rowgroups
+    maxLenPerCol     = if null rows
+        then map (const 0) [1 .. length schema]
         else map (maximum . map (length . strCellValue)) (transpose rows)
     colSizes = zipWith max maxLenPerCol schemaColLengths
 -- | applies padding to the end of a string to match certain length
@@ -171,8 +171,8 @@ executeSubquery (schema, rowgroups) (Where expr) = case result of
 ------
 
 executeSubquery t@(schema, _) (GroupBy columns) = case groupedRows of
-    Right  rg  -> Right (schema, [map head rg])
-    Left err -> Left err
+    Right rg  -> Right (schema, [map head rg])
+    Left  err -> Left err
     where groupedRows = createGroupsBy t columns
 
 -- | groups table rows by the specified columns 
@@ -183,28 +183,29 @@ createGroupsBy (schema, rowGroups) columns = if null err0
   where
     -- pereparation, error checking
     schemaCols       = map fst schema
-    sortedRows = sortRows rows columns schemaCols cellCompareDesc
+    sortedRows       = sortRows rows columns schemaCols cellCompareDesc
     mbSchemaIndicies = zip columns (map (`elemIndex` schemaCols) columns)
     invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
     err0             = if null invalidCols
         then ""
         else "Invalid columns " ++ intercalate "," invalidCols ++ " requested"
-    colIdcs     = map (fromJust . snd) mbSchemaIndicies
-    rows        = concat rowGroups
+    colIdcs = map (fromJust . snd) mbSchemaIndicies
+    rows    = concat rowGroups
     -- compares two rows based on column values (idcs)
     sameOnIdcs idcs ra rb = all (\i -> (ra !! i) == (rb !! i)) idcs
 
 
-sortRows :: Foldable t =>
-    [Row]
+sortRows
+    :: Foldable t
+    => [Row]
     -> t String
     -> [String]
     -> (Cell -> Cell -> Either String Ordering)
     -> Either String [Row]
 sortRows rows columns schemaCols comparer = foldr folder (Right rows) columns
-    where
+  where
     folder column (Right cells) = orderByOne schemaCols column cells comparer
-    folder  _ (Left  msg  )      = Left msg
+    folder _      (Left  msg  ) = Left msg
 
 -- | Orders rows by exactly one column, ordering is stable
 orderByOne
