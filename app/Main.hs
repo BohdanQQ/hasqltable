@@ -6,32 +6,60 @@ import           Config                         ( Config(..)
 import           Data.Char                      ( toLower )
 import           Operations                     ( execute
                                                 , prettyPrintTable
+                                                , tableFileSchema
+                                                , tableToCsv
                                                 )
 import           Options.Applicative
 import           Parsing
 import           System.Exit                    ( exitFailure )
 import           System.IO
+import           Types                          ( Table )
 
--- | an monadic loop with terminating condition
---
--- if fn is true, exits
---
--- monadfirst - the monad which gets a value
---
--- getMonad then returns another monad based on the value returned by monadFirst and the initial value (when fn is false)
---
--- this monad also returns a new value which is used in the next loop
--- and all of this repeats until fn is false
-loopUnlessMonad
-    :: Monad m => m t -> (t -> Bool) -> (t -> a -> m a) -> a -> m ()
-loopUnlessMonad monadfirst fn getMonad initial =
-    monadfirst
-        >>= (\result -> if fn result
-                then return ()
-                else
-                    getMonad result initial
-                        >>= loopUnlessMonad monadfirst fn getMonad
-            )
+-- | the implementation of the REPL
+repl :: IO [Char] -> Either String Table -> Table -> IO ()
+repl firstMonad initial resetTable = do
+    fstRes <- firstMonad
+    let lwrRes = map toLower fstRes
+    if lwrRes == "quit" || lwrRes == "exit"
+        then return ()
+    else if lwrRes == "save"
+        then do
+        putStrLn "Enter name (for csv table and schema file - named the same with .schema added):"
+        fileName <- getLine
+        writeFile fileName (tableToCsv (unwrapTable initial))
+        writeFile (fileName ++ ".schema")
+                    (tableFileSchema (unwrapTable initial))
+        putStrLn
+            $  "Saved into "
+            ++ fileName
+            ++ " and  "
+            ++ (fileName ++ ".schema")
+        repl firstMonad initial resetTable
+    else if lwrRes == "reset" || lwrRes == "reload"
+        then do
+        printTableOrErr (Right resetTable)
+        repl firstMonad (Right resetTable) resetTable
+        else do
+        let parsed = go initial lwrRes
+        printTableOrErr parsed
+        repl firstMonad (retOrElse initial parsed) resetTable
+  where
+    go (Left e) _  = Left e
+    go table    ln = newTable
+      where
+        mbQry    = parseQuery ln
+        newTable = executeWithErr table mbQry
+
+        executeWithErr t (Just subqs) = execute subqs t
+        executeWithErr _ Nothing      = Left "Cannot parse query"
+    retOrElse elseVal (Left _) = elseVal
+    retOrElse _       ifVal    = ifVal
+
+    unwrapTable (Right table) = table
+    unwrapTable _             = undefined
+
+    printTableOrErr (Left  err  ) = putStrLn err
+    printTableOrErr (Right table) = prettyPrintTable table
 
 main :: IO ()
 main = do
@@ -47,36 +75,8 @@ main = do
             prettyPrintTable table
             hClose handle
 
-            loopUnlessMonad
-                getLine                                         -- get input
-                (\x -> map toLower x == "quit" || x == "exit")  -- terminating condition
-                (\ln val ->
-                    putStrLn ""
-                        >>  return (go val ln)                  -- evaluate query with a table    
-                        >>= (\ret -> printTableOrErr ret >> retOrElse val ret) -- print result and propagate proper table into next iteration
-                )                                                              -- proper here means the LAST VALID (Right table) result!!!
-                (Right table)
+            repl getLine (Right table) table
   where
-    -- propagates first argument if the second is Left
-    retOrElse elseVal (Left _) = return elseVal
-    retOrElse _       ifVal    = return ifVal
-
-    printTableOrErr (Left  err  ) = putStrLn err
-    printTableOrErr (Right table) = prettyPrintTable table
-
-    -- handles BOTH query parsing and query execution
-    -- wraps errors into a Left
-    -- correct table into a Right
-    go (Left e) _  = Left e
-    go table    ln = newTable
-      where
-        mbQry    = parseQuery ln
-        newTable = executeWithErr table mbQry
-
-        executeWithErr t (Just subqs) = execute subqs t
-        executeWithErr _ Nothing      = Left "Cannot parse query"
-
-
     isSchemaStrValid :: String -> Bool
     isSchemaStrValid = all (`elem` ['s', 'i', 'd', 'b'])
 

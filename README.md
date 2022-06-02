@@ -15,7 +15,7 @@ The program runs in a REPL. To quit, type `quit` or `exit` as the command.
 
 ## Querying
 
-The REPL is iterative - your querries are applied to the last valid result or the initial table.
+The REPL is iterative - your querries are applied to the last valid result or the initial table. If you wish to reset the iteration, i.e. start over, enter `reload` or `reset` as a command.
 
 The following query structure is suported, clauses are case **insensitive**
 
@@ -99,6 +99,10 @@ An example of a complex query:
 select name, surname, department where `age` / `scorePerDay` <= 12 groupby building orderby asc name, surname limit 2
 ```
 
+## Saving the table
+
+To save the current table (the last valid table printed out), type `save`, hit enter and then input a name which will be used for **both** the table file **and** the table schema file (schema file will have `.schema` appended to the name) and hit enter once again.
+
 # Solution documentation
 
 * `split, optparse-applicative` - dependencies for string splitting, argument parsing
@@ -145,5 +149,6 @@ To generate documentation:
 * parse-time type checking (requires a parser with a state + schema available to it)
 * schema column type does not need to be specified by a `Cell` (which also holds value - unused in the schema)
 * unary operator support (particularly boolean not, which can be implemented using `xor True`)
-* implement saving of the intermediate results into a file (command `save fileName`)
-* implement reloading the original table (`reload` command)
+* `[DONE]` implement saving of the intermediate results into a file (command `save fileName`)
+* `[DONE]` implement reloading the original table (`reload` command)
+* add an option to specify schema by file (consistent with the saving method)

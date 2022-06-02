@@ -1,6 +1,8 @@
 module Operations
     ( prettyPrintTable
     , execute
+    , tableFileSchema
+    , tableToCsv
     ) where
 import           Data.List                      ( elemIndex
                                                 , groupBy
@@ -23,6 +25,13 @@ strCellValue (CInt    i) = show i
 strCellValue (CDouble i) = show i
 strCellValue (CStr    i) = i
 strCellValue (CBool   i) = show i
+
+-- | returns string representation of a cell's type (for schema)
+strCellSchemaSpec :: Cell -> String
+strCellSchemaSpec (CInt    _) = "i"
+strCellSchemaSpec (CDouble _) = "d"
+strCellSchemaSpec (CStr    _) = "s"
+strCellSchemaSpec (CBool   _) = "b"
 
 -- | prints the table with paddinng and column / header boundaries
 prettyPrintTable :: Table -> IO ()
@@ -64,6 +73,24 @@ prettyPrintRow :: Row -> [Int] -> IO ()
 prettyPrintRow row padding = putStrLn $ intercalate
     "|"
     (zipWith (\cell pad -> padTo pad ' ' (strCellValue cell) " ") row padding)
+
+------
+--- FILE SAVING
+------
+-- | returns the schema of the table which can be loaded by this program
+tableFileSchema :: Table -> String
+tableFileSchema (schema, _) =
+    concatMap (strCellSchemaSpec . snd) schema
+
+-- | returns the csv representation of a table
+tableToCsv :: Table -> String
+tableToCsv (schema, rows) =
+    let
+        groupedRows = concat rows
+        schemarow  = intercalate "," (map fst schema) ++ "\n"
+        stringRows = intercalate "\n" $ map (intercalate "," . map strCellValue) groupedRows in
+    schemarow ++ stringRows
+
 
 type QueryResult = Either String Table
 

@@ -17,3 +17,8 @@
 ## 0.9.0.0 -- 2022-05-23
 
 * finishing touches, refactoring
+
+## 0.10.0.0 -- 2022-06-02
+
+* added table saving and reloading
+* restructure REPL to be more flexible
