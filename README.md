@@ -68,7 +68,7 @@ SELECT age WHERE `name` != "BohdanQQ"
 Groups rows based on equality of the columns specified in columnList, filters out only the first row in each group.
 
 
-* see [column list description of the SELECT clause](##Querying)
+* see [column list description of the SELECT clause](#Querying)
 
 ```
 SELECT department, building GROUPBY department, building
@@ -81,7 +81,7 @@ SELECT department, building GROUPBY department, building
 Orders based on the order specified. Columns closer to the beginning of the column list are prioritized over the following colums.
 
 * `asc` or `desc` strings are case insensitive
-* see [column list description of the SELECT clause](##Querying)
+* see [column list description of the SELECT clause](#Querying)
 
 ```
 SELECT name, surname ORDERBY asc surname, name
