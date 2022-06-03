@@ -27,11 +27,11 @@ strCellValue (CStr    i) = i
 strCellValue (CBool   i) = show i
 
 -- | returns string representation of a cell's type (for schema)
-strCellSchemaSpec :: Cell -> String
-strCellSchemaSpec (CInt    _) = "i"
-strCellSchemaSpec (CDouble _) = "d"
-strCellSchemaSpec (CStr    _) = "s"
-strCellSchemaSpec (CBool   _) = "b"
+strCellSchemaSpec :: SchemaType -> String
+strCellSchemaSpec SInt    = "i"
+strCellSchemaSpec SDouble = "d"
+strCellSchemaSpec SStr    = "s"
+strCellSchemaSpec SBool   = "b"
 
 -- | prints the table with paddinng and column / header boundaries
 prettyPrintTable :: Table -> IO ()
@@ -55,7 +55,7 @@ padTo padding padChar strToPad extraStr =
 
 
 -- | prints the schema row and a separatring line
-prettyPrintSchema :: [(String, Cell)] -> [Int] -> IO ()
+prettyPrintSchema :: Schema -> [Int] -> IO ()
 prettyPrintSchema schema padding = do
     putStrLn $ intercalate
         "|"
@@ -79,17 +79,18 @@ prettyPrintRow row padding = putStrLn $ intercalate
 ------
 -- | returns the schema of the table which can be loaded by this program
 tableFileSchema :: Table -> String
-tableFileSchema (schema, _) =
-    concatMap (strCellSchemaSpec . snd) schema
+tableFileSchema (schema, _) = concatMap (strCellSchemaSpec . snd) schema
 
 -- | returns the csv representation of a table
 tableToCsv :: Table -> String
 tableToCsv (schema, rows) =
     let
         groupedRows = concat rows
-        schemarow  = intercalate "," (map fst schema) ++ "\n"
-        stringRows = intercalate "\n" $ map (intercalate "," . map strCellValue) groupedRows in
-    schemarow ++ stringRows
+        schemarow   = intercalate "," (map fst schema) ++ "\n"
+        stringRows  = intercalate "\n"
+            $ map (intercalate "," . map strCellValue) groupedRows
+    in
+        schemarow ++ stringRows
 
 
 type QueryResult = Either String Table

@@ -38,7 +38,7 @@ parseCsv delimiter schemaDesc handle = do
 
 -- | creates schema representation using a list of column names
 -- and a schema description (string of i d b s characters) 
-createDefualtSchema :: [String] -> SchemaDescription -> [(String, Cell)]
+createDefualtSchema :: [String] -> SchemaDescription -> [(String, SchemaType)]
 createDefualtSchema names repr = if valid
     then zipWith createSchemaCell names normalizedRepr
     else error "Invalid schema specification/column names"
@@ -51,10 +51,10 @@ createDefualtSchema names repr = if valid
             && length names
             == length repr
     createSchemaCell name c = case c of
-        'i' -> (name, CInt 0)
-        's' -> (name, CStr "")
-        'd' -> (name, CDouble 0)
-        'b' -> (name, CBool False)
+        'i' -> (name, SInt)
+        's' -> (name, SStr)
+        'd' -> (name, SDouble)
+        'b' -> (name, SBool)
         _   -> error "Invalid specification"
 
 -- | parses a row according to a schema (order of Cells in a list)
@@ -62,7 +62,7 @@ createDefualtSchema names repr = if valid
 -- errors out on invalid (unconvertible) values
 --
 -- SCHEMA -> STRING VALUES OF A ROW -> PARSED ROW
-parseWithSchema :: [Cell] -> [[Char]] -> [Cell]
+parseWithSchema :: [SchemaType] -> [[Char]] -> [Cell]
 parseWithSchema = zipWith parser
   where
     unwrapOrErr :: [Char] -> Maybe p -> p
@@ -72,16 +72,16 @@ parseWithSchema = zipWith parser
         (  "Invalid value "
         ++ cellValue
         ++ " for the schema type "
-        ++ typeOfCell cellTemplate
+        ++ typeOfSchemaStr cellTemplate
         )
         (parseCell cellTemplate cellValue)
 
 
-parseCell :: Cell -> String -> Maybe Cell
-parseCell (CStr    _) s = Just (CStr s)
-parseCell (CInt    _) s = let i = readMaybe s in i >>= Just . CInt
-parseCell (CDouble _) s = let i = readMaybe s in i >>= Just . CDouble
-parseCell (CBool   _) s = let i = readMaybe s in i >>= Just . CBool
+parseCell :: SchemaType -> String -> Maybe Cell
+parseCell SStr    s = Just (CStr s)
+parseCell SInt    s = let i = readMaybe s in i >>= Just . CInt
+parseCell SDouble s = let i = readMaybe s in i >>= Just . CDouble
+parseCell SBool   s = let i = readMaybe s in i >>= Just . CBool
 
 -------
 --- QUERY PARSING

@@ -16,11 +16,13 @@ data Cell
   -- | Boolean DB Table Cell
   | CBool Bool
 
+data SchemaType = SStr | SInt | SDouble | SBool
+
 -- | defines the name and the type of a column
 --
 -- Cell is used to indicate the type to reduce the amount of types
 -- as cells' types can be easily used to identify the column type
-type SchemaItem = (String, Cell)
+type SchemaItem = (String, SchemaType)
 
 -- | defines: 
 -- 
@@ -100,6 +102,13 @@ instance (Eq Cell) where
         ++ ")"
         )
 
+instance (Eq SchemaType) where
+    SStr    == SStr    = True
+    SInt    == SInt    = True
+    SDouble == SDouble = True
+    SBool   == SBool   = True
+    _       == _       = False
+
 instance (Ord Cell) where
     compare (CStr    a) (CStr    b) = compare a b
     compare (CInt    a) (CInt    b) = compare a b
@@ -156,11 +165,23 @@ instance (Show Cell) where
     show (CBool   a) = 'B' : show a
 
 -- | an  alternative to show, returning only the type and not the value contained in the cell
-typeOfCell :: Cell -> [Char]
-typeOfCell (CStr    _) = "String"
-typeOfCell (CInt    _) = "Int"
-typeOfCell (CDouble _) = "Double"
-typeOfCell (CBool   _) = "Bool"
+typeOfCellStr :: Cell -> [Char]
+typeOfCellStr (CStr    _) = "String"
+typeOfCellStr (CInt    _) = "Int"
+typeOfCellStr (CDouble _) = "Double"
+typeOfCellStr (CBool   _) = "Bool"
+
+typeOfSchemaStr :: SchemaType -> [Char]
+typeOfSchemaStr SStr    = "String"
+typeOfSchemaStr SInt    = "Int"
+typeOfSchemaStr SDouble = "Double"
+typeOfSchemaStr SBool   = "Bool"
+
+typeOfCell :: Cell -> SchemaType
+typeOfCell (CStr    _) = SStr
+typeOfCell (CInt    _) = SInt
+typeOfCell (CDouble _) = SDouble
+typeOfCell (CBool   _) = SBool
 
 -- | the ORDERBY order parameter (Ascending/Descending)
 data Order = Asc | Desc
@@ -207,7 +228,7 @@ ensureAndExecuteOp desc judge finalFn argl argr
         (  "Incompatible types for operation `"
         ++ desc
         ++ "`(for types: "
-        ++ showCellsWith typeOfCell [argl, argr]
+        ++ showCellsWith typeOfCellStr [argl, argr]
         ++ ")"
         )
 -- now follows the list of operation functions used to build an expression:
@@ -280,9 +301,9 @@ evalExpr schema row (Col colName)
     | not found = Left ("Column " ++ colName ++ " not found in schema")
     | otherwise = Left
         (  "Type "
-        ++ typeOfCell item
+        ++ typeOfCellStr item
         ++ " should be (according to schema) "
-        ++ typeOfCell unwrapped
+        ++ typeOfSchemaStr unwrapped
         )
   where
     unwrapMaybe _      (Just val) = val
@@ -299,7 +320,7 @@ evalExpr schema row (Col colName)
     -- it is ok to error here since the table parsing ensures the table schema is correct
     -- any discrepancy detected here means that some of the query executors must have corrupted the schema/rows
     item        = getIdxOrErr "Row does not adhere to schema" row index
-    areSameType = typeOfCell item == typeOfCell unwrapped
+    areSameType = typeOfCell item == unwrapped
 
 evalExpr schema row (Operation l op r) =
     evalExpr schema row l >>= (\lres -> evalExpr schema row r >>= op lres)

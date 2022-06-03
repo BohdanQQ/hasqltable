@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Main where
 import           Config                         ( Config(..)
-                                                , parseConfig
+                                                , parseConfig, SchemaInput (File, Raw)
                                                 )
 import           Data.Char                      ( toLower )
 import           Operations                     ( execute
@@ -65,6 +65,9 @@ main :: IO ()
 main = do
     Config {..} <- execParser opts
     handle      <- openFile file ReadMode
+    schema <- case schemaSpec of
+      Raw s -> return s
+      File s -> readFile s
     if not $ isSchemaStrValid schema
         then do
             putStrLn "Invalid schema specification, use the --help switch"
@@ -84,6 +87,6 @@ main = do
     opts             = info
         (parseConfig <* helper)
         (progDesc
-            "Query a (so far only CSV) file. The program runs in a REPL. To quit, type `quit` or `exit` as the command."
+            "Query a (so far only CSV) file. The program runs in a REPL. To quit, type `quit` or `exit` as the command. To save current table or reset to the initial table, type save or reset respectively."
         )
 
