@@ -5,11 +5,13 @@ Simple Querying over (CSV) Tables in Haskell
 
 ## Usage
 
-`hasqltable FILE SCHEMA [-d|--delimiter ARG]`
+    hasqltable FILE [-d|--delimiter ARG] 
+    ((-s|--fileSpec ARG) | (-r|--rawSpec ARG))
 
 Available options:
- * SCHEMA - A string of the b/i/d/s characters representing bool/int/double/string column value in the order as they appear (e.g. "siddd" means the first colum is string, second is int, etc.)
- * -d,--delimiter ARG       The column delimiter
+  * `-d,--delimiter` - The column delimiter
+  * `-s,--fileSpec` - A file to be used to load the schema specifiaction
+  * `-r,--rawSpec` - A string of the b/i/d/s characters representing bool/int/double/string column value in the order as they appear (e.g. "siddd" means the first colum is string, second is int, etc.)
 
 The program runs in a REPL. To quit, type `quit` or `exit` as the command.
 
