@@ -126,7 +126,7 @@ cellOperationError :: [Cell] -> String -> a
 cellOperationError cells operationStr = error
     ("No" ++ operationStr ++ " for cell type" ++ if length cells > 1
         then "s"
-        else "" ++ " " ++ showCellsWith show cells
+        else " " ++ showCellsWith show cells
     )
 
 -- so far implemented only for numeric cell types

@@ -16,50 +16,46 @@ import           System.IO
 import           Types                          ( Table )
 
 -- | the implementation of the REPL
-repl :: IO [Char] -> Either String Table -> Table -> IO ()
-repl firstMonad initial resetTable = do
-    fstRes <- firstMonad
-    let lwrRes = map toLower fstRes
+repl :: IO [Char] -> Table -> Table -> IO ()
+repl inputMonad table originalTable = do
+    input <- inputMonad
+    let lwrRes = map toLower input
     if lwrRes == "quit" || lwrRes == "exit"
         then return ()
     else if lwrRes == "save"
         then do
         putStrLn "Enter name (for csv table and schema file - named the same with .schema added):"
         fileName <- getLine
-        writeFile fileName (tableToCsv (unwrapTable initial))
+        writeFile fileName (tableToCsv table)
         writeFile (fileName ++ ".schema")
-                    (tableFileSchema (unwrapTable initial))
+                    (tableFileSchema table)
         putStrLn
             $  "Saved into "
             ++ fileName
             ++ " and  "
             ++ (fileName ++ ".schema")
-        repl firstMonad initial resetTable
+        repl inputMonad table originalTable
     else if lwrRes == "reset" || lwrRes == "reload"
         then do
-        printTableOrErr (Right resetTable)
-        repl firstMonad (Right resetTable) resetTable
-        else do
-        let parsed = go initial lwrRes
-        printTableOrErr parsed
-        repl firstMonad (retOrElse initial parsed) resetTable
+        printTableOrErr $ Right originalTable
+        repl inputMonad originalTable originalTable
+    else do
+        let modified = go table input
+        printTableOrErr modified
+        let tbl = retOrElse table modified
+        repl inputMonad tbl originalTable
   where
-    go (Left e) _  = Left e
-    go table    ln = newTable
+    go target ln = newTable
       where
         mbQry    = parseQuery ln
-        newTable = executeWithErr table mbQry
+        newTable = executeWithErr target mbQry
 
         executeWithErr t (Just subqs) = execute subqs t
         executeWithErr _ Nothing      = Left "Cannot parse query"
     retOrElse elseVal (Left _) = elseVal
-    retOrElse _       ifVal    = ifVal
-
-    unwrapTable (Right table) = table
-    unwrapTable _             = undefined
-
+    retOrElse _       (Right val)    = val
     printTableOrErr (Left  err  ) = putStrLn err
-    printTableOrErr (Right table) = prettyPrintTable table
+    printTableOrErr (Right t)     = prettyPrintTable t
 
 main :: IO ()
 main = do
@@ -78,7 +74,7 @@ main = do
             prettyPrintTable table
             hClose handle
 
-            repl getLine (Right table) table
+            repl getLine table table
   where
     isSchemaStrValid :: String -> Bool
     isSchemaStrValid = all (`elem` ['s', 'i', 'd', 'b'])

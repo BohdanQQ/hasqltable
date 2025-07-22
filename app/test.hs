@@ -160,13 +160,14 @@ dType = CDouble 0
 sType = CStr ""
 bType = CBool False
 
+cellParseTests :: [((SchemaType, String), Maybe Cell)]
 cellParseTests =
-    [ ((iType, "1")          , Just (CInt 1))
-    , ((iType, "ydsthdvasbd"), Nothing)
-    , ((dType, "1.0")        , Just (CDouble 1.0))
-    , ((dType, "ydsthdvasbd"), Nothing)
-    , ((sType, "1")          , Just (CStr "1"))
-    , ((bType, "True")       , Just (CBool True))
+    [ ((SInt, "1")          , Just (CInt 1))
+    , ((SInt, "ydsthdvasbd"), Nothing)
+    , ((SDouble, "1.0")        , Just (CDouble 1.0))
+    , ((SDouble, "ydsthdvasbd"), Nothing)
+    , ((SStr, "1")          , Just (CStr "1"))
+    , ((SBool, "True")       , Just (CBool True))
     ]
 
 testCellParse = testOn
@@ -215,7 +216,8 @@ testEvalNoTable = zipWith
 
 
 
-nop = (\_ _ -> Right (CBool True))
+nop :: Cell -> Cell -> Either a Cell
+nop _ _ = Right (CBool True)
 parseQueryTests =
     [ ("SELECT x"              , Just [Select ["x"]])
     , ("select x"              , Just [Select ["x"]])
@@ -263,7 +265,7 @@ parseQueryTests =
     , ("select x orderby asc y", Just [Select ["x"], OrderBy (Asc, ["y"])])
     , ("select x orderby asc"      , Nothing)
     , ("select x orderby asc where", Nothing)
-    , ( "select x orderby asc y, z, `alpha`"
+    , ("select x orderby asc y, z, `alpha`"
       , Just [Select ["x"], OrderBy (Asc, ["y", "z", "alpha"])]
       )
     , ("select x orderby asc y, where, `alpha`", Nothing)

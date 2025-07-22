@@ -13,6 +13,7 @@ module Parser
     , many
     , some
     , whitespace
+    , wspaced
     , parserPure
     ) where
 
@@ -57,7 +58,6 @@ instance Applicative Parser where
     (<*>) = M.ap
 
 instance Monad Parser where
-    return = pure
     (>>=)  = parserBind
 
 string :: String -> Parser String
@@ -82,11 +82,14 @@ some p = many p >>= (\match -> if null match then failure else pure match)
 whitespace :: Parser ()
 whitespace =
     many
-            (        (satisfy isSpace >> parserPure ())
+            ((satisfy isSpace >> parserPure ())
             `orElse` singleLineComment
             `orElse` multiLineComment
             )
         >> parserPure ()
+
+wspaced :: Parser a -> Parser a
+wspaced x = whitespace *> x <* whitespace
 
 spaces :: Parser [Char]
 spaces = many $ satisfy isSpace

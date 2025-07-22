@@ -10,10 +10,9 @@ import           Data.List                      ( elemIndex
                                                 , sortBy
                                                 , transpose
                                                 )
-import           Data.Maybe                     ( fromJust
-                                                , isNothing
-                                                )
 import           Types
+import Data.Function ((&))
+import Data.Maybe (listToMaybe)
 
 ------------
 --- PRINTING
@@ -85,10 +84,8 @@ tableFileSchema (schema, _) = concatMap (strCellSchemaSpec . snd) schema
 tableToCsv :: Table -> String
 tableToCsv (schema, rows) =
     let
-        groupedRows = concat rows
         schemarow   = intercalate "," (map fst schema) ++ "\n"
-        stringRows  = intercalate "\n"
-            $ map (intercalate "," . map strCellValue) groupedRows
+        stringRows  = intercalate "\n" $ concat rows & map (intercalate "," . map strCellValue)
     in
         schemarow ++ stringRows
 
@@ -99,15 +96,15 @@ type QueryResult = Either String Table
 --- MAIN QUERY EXECUTOR
 ------
 -- | executes a query on a table
-execute :: [SubQuery] -> QueryResult -> QueryResult
-execute query wrappedTable = foldl exec wrappedTable reorderedQuery
+execute :: [SubQuery] -> Table -> QueryResult
+execute query tbl = foldl exec (Right tbl) reorderedQuery
   where
     -- reordering (for execution) is needed, see below
     reorderedQuery = reorderQuery query
     -- exec - execute subquery or propagate error
     exec (Right table) qry = executeSubquery table qry
     exec (Left  err  ) _   = Left err
-    reorderQuery q = sortBy (\a b -> compare (idQ a) (idQ b)) q
+    reorderQuery = sortBy (\a b -> compare (idQ a) (idQ b))
     idQ :: SubQuery -> Int
     idQ (Select  _) = 10 -- select as last
     idQ (Limit   _) = 9
@@ -115,29 +112,31 @@ execute query wrappedTable = foldl exec wrappedTable reorderedQuery
     idQ (GroupBy _) = 7
     idQ (Where   _) = 6
 
+notInSchemaErr :: [Char] -> [Char]
+notInSchemaErr column = "column " ++ column ++ " not found in schema"
+
+checkedColumnIndicies :: Schema -> [String] -> Either String [Int] 
+checkedColumnIndicies schema cols = do
+    let schemaCols       = map fst schema
+    mapM (\x -> case elemIndex x schemaCols of
+        Nothing -> Left $ notInSchemaErr x
+        Just i -> Right i
+      ) cols
 
 ------
 --- SELECT
 ------
 -- | executes a single subquery on the table
 executeSubquery :: Table -> SubQuery -> QueryResult
-executeSubquery (schema, rowgroups) (Select cols) = if err0 == ""
-    then Right (newSchema, extractedRows)
-    else Left err0
-  where
+executeSubquery (schema, rowgroups) (Select cols) = do
     -- the task here is to extract indicies of column names (cols) in the schema
     -- and filter cells from rows on those positions
-    schemaCols       = map fst schema
-    mbSchemaIndicies = zip cols (map (`elemIndex` schemaCols) cols)
-    invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
-    err0             = if null invalidCols
-        then ""
-        else "Invalid columns (" ++ intercalate "," invalidCols ++ ") requested"
-    schemaIndicies          = map (\(_, Just x) -> x) mbSchemaIndicies
-    extractBySchemaIndicies = \x -> map (x !!) schemaIndicies
-    newSchema               = extractBySchemaIndicies schema
-    extractedRows           = map rowMapper rowgroups
-    rowMapper rows = map extractBySchemaIndicies rows
+    colIndicies <- checkedColumnIndicies schema cols
+    let extractBySchemaIndicies row = map (row !!) colIndicies
+        newSchema                   = map (schema !!) colIndicies
+        extractedRows               = map (map extractBySchemaIndicies) rowgroups
+    Right (newSchema, extractedRows)
+
 
 ------
 --- LIMIT
@@ -149,47 +148,32 @@ executeSubquery (schema, rowgroups) (Limit rowCount) =
 --- ORDER BY
 ------
 
-executeSubquery (schema, rowgroups) (OrderBy (order, columns)) =
-    case sortedRows of
-        (Right res) -> Right (schema, [res])
-        (Left  err) -> Left err
-
+executeSubquery (schema, rowgroups) (OrderBy (order, columns)) = do
+    let schemaCols = map fst schema
+        rows       = concat rowgroups
+    sorted <- sortRows rows columns schemaCols comparer
+    Right (schema, [sorted])
   where
     comparer = case order of
         Asc  -> cellCompareAsc
         Desc -> cellCompareDesc
-    schemaCols = map fst schema
-    rows       = concat rowgroups
-    sortedRows = sortRows rows columns schemaCols comparer
+
 
 ------
 --- WHERE
 ------
-executeSubquery (schema, rowgroups) (Where expr) = case result of
-    Left  s            -> Left s
-    Right filteredRows -> Right (schema, [filteredRows])
-
+executeSubquery (schema, rowgroups) (Where expr) = do
+    evaluated <- concat rowgroups & mapM
+            (\r ->
+                -- forcing evaulation with [boolAnd (Const (CBool True))]
+                -- ensures that expr evaluates to a boolean expression
+                do 
+                    res <- evalExpr schema r (Operation expr boolAnd (Const (CBool True)))
+                    Right (res, r)
+            )
+    let filteredRows = map snd (filter (okResult . fst) evaluated)
+    Right (schema, [filteredRows])
   where
-    rows       = concat rowgroups
-    resultRows = map
-        (\r ->
-            -- forcing evaulation with [boolAnd (Const (CBool True))]
-            -- ensures that expr evaluates to a boolean expression
-            (evalExpr schema r (Operation expr boolAnd (Const (CBool True))), r)
-        )
-        rows
-    -- this propagates the first error (Left) into tmp
-    tmp = foldl (\acc (e, _) -> acc >> e)
-                (Right (CBool True) :: Either String Cell)
-                resultRows
-    result = case tmp of
-        Left  err -> Left err
-        Right _   -> Right
-        -- finally get the rows (snd) for which the expression is true (okResult . fromRightUnsafe . fst)
-            (map snd (filter (okResult . fromRightUnsafe . fst) resultRows))
-    fromRightUnsafe x = case x of
-        Right e -> e
-        Left  _ -> error "Impossible error"
     okResult res = case res of
         (CBool x) -> x
         _         -> False
@@ -198,64 +182,53 @@ executeSubquery (schema, rowgroups) (Where expr) = case result of
 --- GROUP_BY
 ------
 
-executeSubquery t@(schema, _) (GroupBy columns) = case groupedRows of
-    Right rg  -> Right (schema, [map head rg])
-    Left  err -> Left err
-    where groupedRows = createGroupsBy t columns
+executeSubquery t@(schema, _) (GroupBy columns) = do
+    rg <- createGroupsBy t columns
+    heads <- rg & mapM (\x -> listToMaybe x & maybeToRight "Unexpected empty grouped rows")
+    Right (schema, [heads])
 
 -- | groups table rows by the specified columns 
-createGroupsBy :: Table -> [String] -> Either String [[[Cell]]]
-createGroupsBy (schema, rowGroups) columns = if null err0
-    then sortedRows >>= (Right . Data.List.groupBy (sameOnIdcs colIdcs))
-    else Left err0
+createGroupsBy :: Table -> [String] -> Either String [RowGroup]
+createGroupsBy (schema, rowGroups) cols = do
+    colIndicies <- checkedColumnIndicies schema cols
+    let 
+        schemaCols = map fst schema
+    sortedRows <- sortRows rows cols schemaCols cellCompareDesc
+    Right (Data.List.groupBy (sameOnIdcs colIndicies) sortedRows)
   where
     -- pereparation, error checking
-    schemaCols       = map fst schema
-    sortedRows       = sortRows rows columns schemaCols cellCompareDesc
-    mbSchemaIndicies = zip columns (map (`elemIndex` schemaCols) columns)
-    invalidCols      = map fst (filter (isNothing . snd) mbSchemaIndicies)
-    err0             = if null invalidCols
-        then ""
-        else "Invalid columns " ++ intercalate "," invalidCols ++ " requested"
-    colIdcs = map (fromJust . snd) mbSchemaIndicies
     rows    = concat rowGroups
     -- compares two rows based on column values (idcs)
     sameOnIdcs idcs ra rb = all (\i -> (ra !! i) == (rb !! i)) idcs
 
+maybeToRight :: b -> Maybe a -> Either b a
+maybeToRight err x = case x of
+    Just y -> Right y
+    Nothing -> Left err
 
-sortRows
-    :: Foldable t
-    => [Row]
-    -> t String
+
+sortRows :: [Row]
+    -> [String]
     -> [String]
     -> (Cell -> Cell -> Either String Ordering)
     -> Either String [Row]
-sortRows rows columns schemaCols comparer = foldr folder (Right rows) columns
-  where
-    folder column (Right cells) = orderByOne schemaCols column cells comparer
-    folder _      (Left  msg  ) = Left msg
-
--- | Orders rows by exactly one column, ordering is stable
-orderByOne
-    :: [String]
-    -> String
-    -> [Row]
-    -> (Cell -> Cell -> Either String Ordering)
-    -> Either String [Row]
-orderByOne schema column rows comparer = if isNothing mbColIdx
-    then Left $ "Could not find column " ++ column
-    else Right sortedRows
-  where
-    -- sortBy is stable
-    sortedRows = Data.List.sortBy
-        (\r1 r2 -> case comparer (r1 !! colIdx) (r2 !! colIdx) of
-            -- parsing error / table corruption, terminate
-            Left s -> error
-                ("Table parsed into invalid format! Attempted to compare incompatible types: "
-                ++ s
-                )
-            Right ord -> ord
+sortRows rows columns schemaCols comparer = foldr 
+        (\column acc -> do
+            _ <- acc
+            colIdx <- elemIndex column schemaCols & maybeToRight (notInSchemaErr column)
+            Right $ sortedAt colIdx
         )
-        rows
-    mbColIdx = elemIndex column schema
-    colIdx   = fromJust mbColIdx
+        (Right rows) columns
+    where
+    sortedAt idx =
+      rows
+        & Data.List.sortBy
+          ( \r1 r2 -> case comparer (r1 !! idx) (r2 !! idx) of
+              -- parsing error / table corruption, terminate
+              Left s ->
+                error
+                  ( "Table parsed into invalid format! Attempted to compare incompatible types: "
+                      ++ s
+                  )
+              Right ord -> ord
+          )

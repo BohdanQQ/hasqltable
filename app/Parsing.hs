@@ -14,6 +14,9 @@ import           GHC.IO.Handle                  ( Handle
 import           Parser
 import           Text.Read
 import           Types
+import Control.Applicative (liftA3)
+import Data.Functor ((<&>), ($>))
+import Data.Maybe (maybeToList)
 -----------------
 ---TABLES PARSING
 -----------------
@@ -25,14 +28,14 @@ parseCsv :: Delimiter -> SchemaDescription -> Handle -> IO Table
 parseCsv delimiter schemaDesc handle = do
     contents <- hGetContents handle
     let rawRows   = lines contents
-    let splitRows = map (splitOn delimiter) rawRows
-    let header = if null rawRows
+        splitRows = map (splitOn delimiter) rawRows
+        header = if null rawRows
             then error "No rows, schema could not be loaded!"
             else head splitRows
-    let body            = tail splitRows
-    let schema          = createDefualtSchema header schemaDesc
-    let schemaCellOrder = map snd schema
-    let tbody           = map (parseWithSchema schemaCellOrder) body
+        body            = tail splitRows
+        schema          = createDefualtSchema header schemaDesc
+        schemaCellOrder = map snd schema
+        tbody           = map (parseWithSchema schemaCellOrder) body
     return (schema, [tbody])
 
 
@@ -55,7 +58,7 @@ createDefualtSchema names repr = if valid
         's' -> (name, SStr)
         'd' -> (name, SDouble)
         'b' -> (name, SBool)
-        _   -> error "Invalid specification"
+        _   -> error $ "Invalid schema specification \"" ++ show c ++ "\" for column" ++ name
 
 -- | parses a row according to a schema (order of Cells in a list)
 --
@@ -78,10 +81,10 @@ parseWithSchema = zipWith parser
 
 
 parseCell :: SchemaType -> String -> Maybe Cell
-parseCell SStr    s = Just (CStr s)
-parseCell SInt    s = let i = readMaybe s in i >>= Just . CInt
-parseCell SDouble s = let i = readMaybe s in i >>= Just . CDouble
-parseCell SBool   s = let i = readMaybe s in i >>= Just . CBool
+parseCell SStr    s = Just $ CStr s
+parseCell SInt    s = readMaybe s <&> CInt
+parseCell SDouble s = readMaybe s <&> CDouble
+parseCell SBool   s = readMaybe s <&> CBool
 
 -------
 --- QUERY PARSING
@@ -93,28 +96,19 @@ parseCell SBool   s = let i = readMaybe s in i >>= Just . CBool
 -- Just variants are unwrapped into the list and Nothing variants are ignored
 parseSequenceWithAccumulation :: [Parser (Maybe a)] -> Parser [a]
 parseSequenceWithAccumulation (p : ps) =
-    p
-        >>= (\result ->
-                whitespace
-                    >>  parseSequenceWithAccumulation ps
-                    >>= (\sndRes -> parserPure (extract result ++ sndRes))
-            )
-  where
-    extract (Just x) = [x]
-    extract _        = []
-parseSequenceWithAccumulation [] = parserPure []
+    liftA2 (\x y -> maybeToList x ++ y) p (whitespace *> parseSequenceWithAccumulation ps)
+parseSequenceWithAccumulation [] = pure []
 
 -- | Wraps a successful parser result in a Maybe
 wrapWithJust :: Parser a -> Parser (Maybe a)
-wrapWithJust p = p >>= (parserPure . Just)
+wrapWithJust p = Just <$> p
 
 -- | Parses a query string into a list of subqueries in the order as they appear in the input string
 parseQuery :: String -> Maybe [SubQuery]
-parseQuery q = case res of
-    (Just (result, rest)) -> if null rest then Just result else Nothing
-    Nothing               -> Nothing
+parseQuery q = do
+    (result, rest) <- runParser (p <* whitespace) q
+    if null rest then Just result else Nothing
   where
-    res = runParser (p >>= (\r -> whitespace >> parserPure r)) q
     p   = parseSequenceWithAccumulation
     -- accumulates each (parsed) query 
         (wrapWithJust parseSelect : safeSubqueries)
@@ -129,7 +123,7 @@ parseQuery q = case res of
     -- this parser always succeeds, but propagates errors in the form of Nothing
     -- which is then ignored by the collector (parseSequenceWithAccumulation)
     safeSubquerryMapper parser =
-        wrapWithJust parser `orElse` parserPure Nothing
+        wrapWithJust parser `orElse` pure Nothing
 
 --------------------------------------------------------------------------------
 --- subquery parsers
@@ -140,18 +134,14 @@ parseQuery q = case res of
 -- the \`column`\ option is there to provide a way to refer to such columns
 parseSelect :: Parser SubQuery
 parseSelect =
-    lowerUpperString "SELECT "
-        >>  whitespace
-        >>  colListParser
-        >>= (parserPure . Select)
+    Select <$> (lowerUpperString "SELECT "
+        >>  whitespace >> colListParser)
 
 -- | parses the entire LIMIT clause in the form "LIMIT positiveInteger"
 parseLimit :: Parser SubQuery
 parseLimit =
-    lowerUpperString "LIMIT "
-        >>  whitespace
-        >>  positiveInteger
-        >>= (parserPure . Limit . read)
+    Limit . read <$> (lowerUpperString "LIMIT "
+        >>  whitespace >> positiveInteger)
 
 -- | parses the entire WHERE clause in the form "WHERE expr"
 -- where expr is either "n op n cop n op n" (op - arithmetic, cop - comparison operator)
@@ -163,71 +153,50 @@ parseLimit =
 -- or bool (bool - True/False literal or \`column\`)
 parseSimpleWhere :: Parser SubQuery
 parseSimpleWhere =
-    lowerUpperString "WHERE "
-        >>  whitespace
-        >>  simpleExpr
-        >>= (\e -> whitespace >> parserPure (Where e))
+    Where <$> (lowerUpperString "WHERE "
+        >> wspaced simpleExpr)
 
 -- | parses the entire ORDERBY clause in the form "ORDERBY [asc|desc] [nColumn | \`column\`]"
 -- where nColumn is a string not equal to any of the clauses (select, ...)
 -- the \`column`\ option is there to provide a way to refer to such columns
 parseOrderBy :: Parser SubQuery
 parseOrderBy =
-    lowerUpperString "ORDERBY "
-        >>  whitespace
-        >>  parseSequenceWithAccumulation
-                [wrapWithJust ascDescParser, wrapWithJust colListParser]
-        >>= (\[[order], columns] ->
-                whitespace >> parserPure (OrderBy (getOrder order, columns))
-            )
+    OrderBy <$> (lowerUpperString "ORDERBY "
+        >>  wspaced (liftA2 (,) ascDescParser colListParser))
   where
-    getOrder o = if map toLower o == "asc" then Asc else Desc
-    -- not parsing into Order directly in order to use this parser in the parseSequenceWithAccumulation function
+    ascDescParser :: Parser Order
     ascDescParser =
-        (lowerUpperString "asc" `orElse` lowerUpperString "desc")
-            >>= (\ord -> whitespace >> parserPure [ord])
+        (lowerUpperString "asc" >> wspaceAndOrd Asc)
+        `orElse` (lowerUpperString "desc" >> wspaceAndOrd Desc)
+    wspaceAndOrd o = whitespace $> o
 
 -- | parses the entire GROUPBY clause in the form "GROUPBY [nColumn | \`column\`]"
 -- where nColumn is a string not equal to any of the clauses (select, ...)
 -- the \`column`\ option is there to provide a way to refer to such columns
 parseGroupBy :: Parser SubQuery
 parseGroupBy =
-    lowerUpperString "GROUPBY "
-        >>  whitespace
-        >>  colListParser
-        >>= (\columns -> whitespace >> parserPure (GroupBy columns))
+    GroupBy <$> (lowerUpperString "GROUPBY "
+        >>  wspaced colListParser)
 
 -- | parses "true" or "false" (case-totally-insensitive)
 boolExpr :: Parser Expr
 boolExpr =
-    (Parser.lowerUpperString "true" >> parserPure (Const (CBool True)))
-        `orElse` (  Parser.lowerUpperString "false"
-                 >> parserPure (Const (CBool False))
-                 )
+    (lowerUpperString "true" $> Const (CBool True)) `orElse` (lowerUpperString "false" $> Const (CBool False))
 
 -- | parses terminal expression of the where clause expression
 -- this is either a constant (True, False, 123, ...) or a column representation (name, age ,...)
 termExpr :: Parser Expr
 termExpr =
-    (escapedWord >>= (parserPure . Col))
+    (escapedWord <&> Col)
         `orElse` boolExpr
-        `orElse` (double >>= (parserPure . Const . CDouble . read))
-        `orElse` (integer >>= (parserPure . Const . CInt . read))
-        `orElse` (stringLiteral >>= (parserPure . Const . CStr))
+        `orElse` (double <&> Const . CDouble . read)
+        `orElse` (integer <&> Const . CInt . read)
+        `orElse` (stringLiteral <&> Const . CStr)
 
 -- | parses (leftTerminalExpr op rightTerminalExpr)-type expression 
 opExpr :: Parser Expr
 opExpr =
-    termExpr
-        >>= (\lexpr ->
-                whitespace
-                    >>  arithOperation
-                    >>= (\o ->
-                            whitespace
-                                >>  termExpr
-                                >>= (parserPure . Operation lexpr o)
-                        )
-            )
+    Operation <$> wspaced termExpr <*> wspaced arithOperation <*> termExpr
 
 -- | parses one side of the where clause expression (on a side of a boolean operator)
 sideExpr :: Parser Expr
@@ -238,39 +207,29 @@ sideExpr = opExpr `orElse` termExpr
 -- for more, see parseSimpleWhere
 simpleExpr :: Parser Expr
 simpleExpr =
-    (   sideExpr
-        >>= (\lexpr ->
-                whitespace
-                    >>  whereOperation
-                    >>= (\o ->
-                            whitespace
-                                >>  sideExpr
-                                >>= (parserPure . Operation lexpr o)
-                        )
-            )
-        )
-        `orElse` boolExpr
+    (Operation <$> wspaced sideExpr <*> wspaced whereOperation <*> sideExpr)
+    `orElse` boolExpr
 
 -- | parses an arithmetic operator
 arithOperation :: Parser (Cell -> Cell -> Either String Cell)
 arithOperation =
-    (string "+" >> parserPure add)
-        `orElse` (string "-" >> parserPure sub)
-        `orElse` (string "*" >> parserPure mul)
-        `orElse` (string "/" >> parserPure Types.div)
+    (string "+" $> add)
+        `orElse` (string "-" $> sub)
+        `orElse` (string "*" $> mul)
+        `orElse` (string "/" $> Types.div)
 
 -- | parses a where clause boolean operator
 whereOperation :: Parser (Cell -> Cell -> Either String Cell)
 whereOperation =
-    (string "&" >> parserPure boolAnd)
-        `orElse` (string "|" >> parserPure boolOr)
-        `orElse` (string "^" >> parserPure boolXor)
-        `orElse` (string "<=" >> parserPure cellLeq)
-        `orElse` (string "<" >> parserPure cellLe)
-        `orElse` (string ">=" >> parserPure cellGeq)
-        `orElse` (string ">" >> parserPure cellGe)
-        `orElse` (string "==" >> parserPure cellEq)
-        `orElse` (string "!=" >> parserPure cellNeq)
+    (string "&" $> boolAnd)
+        `orElse` (string "|"  $> boolOr)
+        `orElse` (string "^"  $> boolXor)
+        `orElse` (string "<=" $> cellLeq)
+        `orElse` (string "<"  $> cellLe)
+        `orElse` (string ">=" $> cellGeq)
+        `orElse` (string ">"  $> cellGe)
+        `orElse` (string "==" $> cellEq)
+        `orElse` (string "!=" $> cellNeq)
 
 --------------------------------------------------------------------------------
 --- helpers
@@ -278,21 +237,14 @@ whereOperation =
 -- | matches a string literal "str", str excludes the " and newline characters
 stringLiteral :: Parser [Char]
 stringLiteral =
-    string "\""
-        >>  some (satisfy (\x -> x `notElem` ['"', '\n']))
-        >>= (\res -> string "\"" >> parserPure res)
+    string "\"" >>  some (satisfy (\x -> x `notElem` ['"', '\n'])) <* string "\""
 
 -- | matches a "double" literal "dbl" in the form of a decimal number (decimal separator is a . (dot))
 double :: Parser [Char]
-double =
-    (        parseSequenceWithAccumulation
-                [ wrapWithJust integer
-                , wrapWithJust (string ".")
-                , wrapWithJust positiveInteger
-                ]
-        `orElse` parseSequenceWithAccumulation [wrapWithJust integer]
-        )
-        >>= (parserPure . concat)
+double = decimal `orElse` integer
+    where
+        decimal = liftA3 (\x y z -> concat [x, y, z]) integer (string ".") positiveInteger
+
 
 -- | matches a positive or negative integer
 integer :: Parser [Char]
@@ -305,7 +257,7 @@ negativeInteger =
     string "-"
         >>  whitespace
         >>  positiveInteger
-        >>= (\res -> parserPure ('-' : res))
+        <&> ('-' :)
 
 -- | parses the column list [nColumn | \`column\`]"
 -- where nColumn is a string not equal to any of the clauses (select, ...)
@@ -314,17 +266,10 @@ negativeInteger =
 -- the pattern looks like this (with whitespaces in between):
 -- word(,word)*
 colListParser :: Parser [[Char]]
-colListParser =
-    word
-        >>= (\matchedWord ->
-                many spacedWord
-                    >>= (\matchedWords ->
-                            parserPure (matchedWord : matchedWords)
-                        )
-            )
+colListParser = liftA2 (:) (whitespace >> word) (many spacedWord)
   where
     -- | matches the following pattern: (whistepace)*,(whitespace)*word
-    spacedWord = Parser.whitespace >> string "," >> Parser.whitespace >> word
+    spacedWord = whitespace >> string "," >> whitespace >> word
 
 -- | parses a word OR \`word\`
 word :: Parser [Char]
@@ -332,22 +277,18 @@ word = notClause `orElse` escapedWord
 
 -- | parses \`word\`
 escapedWord :: Parser [Char]
-escapedWord =
-    Parser.string "`"
-        >>  pureWord
-        >>= (\match -> Parser.string "`" >> parserPure match)
+escapedWord = string "`" >> pureWord <* string "`"
 
 -- | ensures the parsed word is not a form of any clause
 notClause :: Parser [Char]
-notClause =
-    pureWord
-        >>= (\match -> if map toLower match `elem` clauses
-                then Parser.failure
-                else parserPure match
-            )
+notClause = do
+    match <- pureWord
+    if map toLower match `elem` clauses
+        then failure
+        else pure match
     where clauses = ["select", "where", "groupby", "orderby", "limit"]
 
 -- | simple word for a list of words (not \` nor ,)
 pureWord :: Parser [Char]
-pureWord = Parser.some
-    (Parser.satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
+pureWord = some
+    (satisfy (\c -> not $ isSpace c || (c == '`') || (c == ',')))
