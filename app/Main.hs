@@ -13,7 +13,8 @@ import           Options.Applicative
 import           Parsing
 import           System.Exit                    ( exitFailure )
 import           System.IO
-import           Types                          ( Table )
+import           Types                          ( Table, mbToEith )
+import           Data.Function ((&))
 
 -- | the implementation of the REPL
 repl :: IO [Char] -> Table -> Table -> IO ()
@@ -45,15 +46,13 @@ repl inputMonad table originalTable = do
         let tbl = retOrElse table modified
         repl inputMonad tbl originalTable
   where
-    go target ln = newTable
-      where
-        mbQry    = parseQuery ln
-        newTable = executeWithErr target mbQry
-
-        executeWithErr t (Just subqs) = execute subqs t
-        executeWithErr _ Nothing      = Left "Cannot parse query"
+    go target ln = do
+        qry <- parseQuery ln & mbToEith "Cannot parse query"
+        execute qry target
+    
     retOrElse elseVal (Left _) = elseVal
     retOrElse _       (Right val)    = val
+    
     printTableOrErr (Left  err  ) = putStrLn err
     printTableOrErr (Right t)     = prettyPrintTable t
 
@@ -78,7 +77,6 @@ main = do
   where
     isSchemaStrValid :: String -> Bool
     isSchemaStrValid = all (`elem` ['s', 'i', 'd', 'b'])
-
 
     opts             = info
         (parseConfig <* helper)

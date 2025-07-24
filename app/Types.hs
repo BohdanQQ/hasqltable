@@ -1,8 +1,13 @@
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE TypeOperators #-}
 module Types where
 import           Data.List                      ( elemIndex
                                                 , intercalate
                                                 )
-import           Data.Maybe                     ( isJust )
+import           Data.Maybe                     ( isJust, isNothing )
+import GHC.List ((!?))
+import Data.Function ((&))
+import Data.Bits (Bits(xor))
 
 -- | The cetnral type of the program, holds a string/integer/double/bool value
 -- and represents a single cell in the DB table 
@@ -171,11 +176,11 @@ typeOfCellStr (CInt    _) = "Int"
 typeOfCellStr (CDouble _) = "Double"
 typeOfCellStr (CBool   _) = "Bool"
 
-typeOfSchemaStr :: SchemaType -> [Char]
-typeOfSchemaStr SStr    = "String"
-typeOfSchemaStr SInt    = "Int"
-typeOfSchemaStr SDouble = "Double"
-typeOfSchemaStr SBool   = "Bool"
+instance Show SchemaType where
+    show SStr    = "String"
+    show SInt    = "Int"
+    show SDouble = "Double"
+    show SBool   = "Bool"
 
 typeOfCell :: Cell -> SchemaType
 typeOfCell (CStr    _) = SStr
@@ -216,13 +221,13 @@ data Expr
 --
 -- this function is used to ensure compatibility
 ensureAndExecuteOp
-    :: String
-    -> (Cell -> Cell -> Bool)
+    :: (Cell -> Cell -> Bool)
+    -> String
     -> (Cell -> Cell -> a)
     -> Cell
     -> Cell
     -> Either String a
-ensureAndExecuteOp desc judge finalFn argl argr
+ensureAndExecuteOp judge desc finalFn argl argr
     | judge argl argr = Right (finalFn argl argr)
     | otherwise = Left
         (  "Incompatible types for operation `"
@@ -231,6 +236,16 @@ ensureAndExecuteOp desc judge finalFn argl argr
         ++ showCellsWith typeOfCellStr [argl, argr]
         ++ ")"
         )
+
+executeArith :: String -> (Cell -> Cell -> a) -> Cell -> Cell -> Either String a
+executeArith = ensureAndExecuteOp compatibleArith
+
+executeBool :: String -> (Cell -> Cell -> a) -> Cell -> Cell -> Either String a
+executeBool = ensureAndExecuteOp boolCheck
+
+executeOrd :: String -> (Cell -> Cell -> a) -> Cell -> Cell -> Either String a
+executeOrd = ensureAndExecuteOp compatibleOrd
+
 -- now follows the list of operation functions used to build an expression:
 
 -- TODO: unary operator support (not, unary -)
@@ -240,87 +255,86 @@ boolCheck _         _         = False
 
 
 add :: Cell -> Cell -> Either String Cell
-add = ensureAndExecuteOp "+" compatibleArith (+)
+add = executeArith "+" (+)
 
 mul :: Cell -> Cell -> Either String Cell
-mul = ensureAndExecuteOp "*" compatibleArith (*)
+mul = executeArith "*" (*)
 
 sub :: Cell -> Cell -> Either String Cell
-sub = ensureAndExecuteOp "-" compatibleArith (-)
+sub = executeArith "-" (-)
 
 div :: Cell -> Cell -> Either String Cell
-div = ensureAndExecuteOp "/" compatibleArith (/)
+div = executeArith "/" (/)
 
 boolAnd :: Cell -> Cell -> Either String Cell
 boolAnd =
-    ensureAndExecuteOp "&" boolCheck (\(CBool a) (CBool b) -> CBool (a && b))
+    executeBool "&" (\(CBool a) (CBool b) -> CBool $ a && b)
 
 boolOr :: Cell -> Cell -> Either String Cell
 boolOr =
-    ensureAndExecuteOp "|" boolCheck (\(CBool a) (CBool b) -> CBool (a || b))
+    executeBool "|" (\(CBool a) (CBool b) -> CBool $ a || b)
 
 boolXor :: Cell -> Cell -> Either String Cell
-boolXor = ensureAndExecuteOp
-    "^"
-    boolCheck
-    (\(CBool a) (CBool b) -> CBool ((a || b) && (not a || not b)))
+boolXor = executeBool "^"
+    (\(CBool a) (CBool b) -> CBool $ (a || b) && (not a || not b))
 cellCompareAsc :: Cell -> Cell -> Either String Ordering
-cellCompareAsc = ensureAndExecuteOp "comparison asc" compatibleOrd compare
+cellCompareAsc = executeOrd "comparison asc" compare
 
 cellCompareDesc :: Cell -> Cell -> Either String Ordering
 cellCompareDesc =
-    ensureAndExecuteOp "comparison desc" compatibleOrd (flip compare)
+    executeOrd "comparison desc" (flip compare)
 
 compatibleOrdEq :: Compat a => a -> a -> Bool
 compatibleOrdEq x y = compatibleEq x y && compatibleEq x y
 
 cellLeq :: Cell -> Cell -> Either String Cell
-cellLeq = ensureAndExecuteOp "<=" compatibleOrdEq (\a b -> CBool (a <= b))
+cellLeq = executeOrd "<=" (\a b -> CBool $ a <= b)
 
 cellLe :: Cell -> Cell -> Either String Cell
-cellLe = ensureAndExecuteOp "<" compatibleOrd (\a b -> CBool (a < b))
+cellLe = executeOrd "<" (\a b -> CBool $ a < b)
 
 cellGeq :: Cell -> Cell -> Either String Cell
-cellGeq = ensureAndExecuteOp ">=" compatibleOrdEq (\a b -> CBool (a >= b))
+cellGeq = executeOrd ">=" (\a b -> CBool $ a >= b)
 
 cellGe :: Cell -> Cell -> Either String Cell
-cellGe = ensureAndExecuteOp ">" compatibleOrd (\a b -> CBool (a > b))
+cellGe = executeOrd ">" (\a b -> CBool $ a > b)
 
 cellEq :: Cell -> Cell -> Either String Cell
-cellEq = ensureAndExecuteOp "== (equal)" compatibleEq (\a b -> CBool (a == b))
+cellEq = ensureAndExecuteOp compatibleEq "== (equal)" (\a b -> CBool (a == b))
 
 cellNeq :: Cell -> Cell -> Either String Cell
 cellNeq =
-    ensureAndExecuteOp "!= (not equal)" compatibleEq (\a b -> CBool (a /= b))
+    ensureAndExecuteOp compatibleEq "!= (not equal)" (\a b -> CBool (a /= b))
+
+toEither :: Monad m => (m a -> Maybe a) -> String -> m a -> Either String a
+toEither extract msg x = do
+    let res = extract x
+    if isNothing res then Left msg else return $ unwrap res
+    where
+    unwrap (Just a) = a
+
+mbToEith :: String -> Maybe a -> Either String a
+mbToEith = toEither id
+
+getCellByColname :: Schema -> Row -> String -> Either String Cell
+getCellByColname schema row colName = do
+    -- & mbToEither ... - error handling, feel free to stop reading at &
+    colType <- lookup colName schema & mbToEith ("Column " ++ colName ++ " not found in schema")
+    colIdx  <- elemIndex (colName, colType) schema & mbToEith "impossible"
+    rowItemAtIdx <- row !? colIdx & mbToEith "Row does not adhere to the schema!"
+    if typeOfCell rowItemAtIdx /= colType then
+        Left $ "Row cell's type is "
+        ++ typeOfCellStr rowItemAtIdx
+        ++ " but should be (according to schema) "
+        ++ show colType
+    else
+        return rowItemAtIdx
 
 -- | evaluates an expression in the context of a row (adhering to a schema)
 evalExpr :: Schema -> Row -> Expr -> Either String Cell
 evalExpr _ _ (Const cell) = Right cell
-evalExpr schema row (Col colName)
-    | found && areSameType = Right item
-    | not found = Left ("Column " ++ colName ++ " not found in schema")
-    | otherwise = Left
-        (  "Type "
-        ++ typeOfCellStr item
-        ++ " should be (according to schema) "
-        ++ typeOfSchemaStr unwrapped
-        )
-  where
-    unwrapMaybe _      (Just val) = val
-    unwrapMaybe errMsg _          = error errMsg
-
-    getIdxOrErr errMsg r i | length r <= i = error errMsg
-                           | otherwise     = r !! i
-
-    foundItem = lookup colName schema
-    found     = isJust foundItem
-    unwrapped = unwrapMaybe "impossible error" foundItem
-    index     = unwrapMaybe "impossible error"
-                            (elemIndex (colName, unwrapped) schema)
-    -- it is ok to error here since the table parsing ensures the table schema is correct
-    -- any discrepancy detected here means that some of the query executors must have corrupted the schema/rows
-    item        = getIdxOrErr "Row does not adhere to schema" row index
-    areSameType = typeOfCell item == unwrapped
-
-evalExpr schema row (Operation l op r) =
-    evalExpr schema row l >>= (\lres -> evalExpr schema row r >>= op lres)
+evalExpr schema row (Col colName) = getCellByColname schema row colName
+evalExpr schema row (Operation l op r) = do
+    lres <- evalExpr schema row l
+    rres <- evalExpr schema row r
+    op lres rres

@@ -75,7 +75,7 @@ parseWithSchema = zipWith parser
         (  "Invalid value "
         ++ cellValue
         ++ " for the schema type "
-        ++ typeOfSchemaStr cellTemplate
+        ++ show cellTemplate
         )
         (parseCell cellTemplate cellValue)
 
